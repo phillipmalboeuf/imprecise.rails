@@ -1,0 +1,36 @@
+<h1>New Project</h1>
+
+<%= tag.div(flash[:alert], style: "color:red") if flash[:alert] %>
+<%= tag.div(flash[:notice], style: "color:green") if flash[:notice] %>
+
+<%= form_with model: @project, url: projects_path do |form| %>
+  <% if @project.errors.any? %>
+    <div style="color:red">
+      <h2><%= pluralize(@project.errors.count, "error") %> prohibited this project from being saved:</h2>
+      <ul>
+        <% @project.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <%= form.label :name, "Name" %>
+  <%= form.text_field :name, required: true, autofocus: true, placeholder: "Enter project name" %><br>
+
+  <%= form.label :slug, "Slug" %>
+  <%= form.text_field :slug, required: true, placeholder: "Enter project slug (e.g., my-project)" %><br>
+
+  <%= form.label :status, "Status" %>
+  <%= form.select :status, options_for_select([["Draft", "draft"], ["Published", "published"], ["Archived", "archived"]], @project.status), { prompt: "Select status" }, { required: true } %><br>
+
+  <%= form.label :prompt_type, "Prompt Type" %>
+  <%= form.select :prompt_type, options_for_select([["Is it Spam", "is-it-spam"], ["Is it AI", "is-it-ai"], ["Topics", "topics"], ["Sentiment", "sentiment"]], @project.prompt_type), { prompt: "Select prompt type" }, { required: true } %><br>
+
+  <%= form.submit "Create Project" %>
+<% end %>
+
+<br>
+
+<%= link_to "Back to projects", projects_path %>
+

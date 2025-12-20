@@ -1,0 +1,38 @@
+<h1>Projects</h1>
+
+<%= link_to "New project", new_project_path %>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Slug</th>
+      <th>Status</th>
+      <th>Prompt Type</th>
+      <th>Owner</th>
+      <th>Created At</th>
+      <th>Updated At</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% if @projects.any? %>
+      <% @projects.each do |project| %>
+        <tr>
+          <td><%= project.id %></td>
+          <td><%= project.name %></td>
+          <td><%= project.slug %></td>
+          <td><%= project.status %></td>
+          <td><%= project.prompt_type %></td>
+          <td><%= project.owner&.email_address %></td>
+          <td><%= project.created_at %></td>
+          <td><%= project.updated_at %></td>
+        </tr>
+      <% end %>
+    <% else %>
+      <tr>
+        <td colspan="8">No projects found.</td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
