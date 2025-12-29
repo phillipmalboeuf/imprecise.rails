@@ -24,12 +24,14 @@
   </head>
 
   <body>
-    <nav>
-      <%= link_to "Projects", projects_path %>
-      <%= button_to "Log out", session_path, method: :delete if authenticated? %>
+    <nav class="navbar">
+      <ul class="menu menu-horizontal">
+        <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
+        <li><%= button_to "Log out", session_path, method: :delete, class: "btn btn-sm btn-soft" if authenticated? %></li>
+      </ul>
     </nav>
 
-    <main>
+    <main class="p-4">
       <%= yield %>
     </main>
   </body>
