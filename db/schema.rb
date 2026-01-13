@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2025_12_20_193441) do
+ActiveRecord::Schema[8.1].define(version: 2025_12_29_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pscale_extensions.hypopg"
@@ -25,6 +25,15 @@ ActiveRecord::Schema[8.1].define(version: 2025_12_20_193441) do
     t.bigint "user_id"
     t.index ["slug"], name: "index_projects_on_slug", unique: true
     t.index ["user_id"], name: "index_projects_on_user_id"
+  end
+
+  create_table "queries", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "project_id", null: false
+    t.text "query", null: false
+    t.jsonb "response"
+    t.datetime "updated_at", null: false
+    t.index ["project_id"], name: "index_queries_on_project_id"
   end
 
   create_table "sessions", force: :cascade do |t|
@@ -45,5 +54,6 @@ ActiveRecord::Schema[8.1].define(version: 2025_12_20_193441) do
   end
 
   add_foreign_key "projects", "users"
+  add_foreign_key "queries", "projects"
   add_foreign_key "sessions", "users"
 end
