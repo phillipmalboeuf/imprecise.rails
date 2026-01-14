@@ -49,6 +49,11 @@ EOF
     --role-name "$ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
 
+  # Attach SSM policy (required for Systems Manager)
+  aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
   # Create custom policy for Secrets Manager access
   cat > /tmp/secrets-policy.json << EOF
 {
@@ -145,6 +150,11 @@ EOF
   aws iam attach-role-policy \
     --role-name "$GITHUB_ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/AmazonRDSReadOnlyAccess
+  
+  # Attach SSM policy for Systems Manager access (alternative to SSH)
+  aws iam attach-role-policy \
+    --role-name "$GITHUB_ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   # Create custom policy for deployment operations
   cat > /tmp/deploy-policy.json << EOF
@@ -172,10 +182,27 @@ EOF
     {
       "Effect": "Allow",
       "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::${ACCOUNT_ID}:role/imprecise-deploy-instance-role"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetInstanceProfile"
+      ],
+      "Resource": "arn:aws:iam::${ACCOUNT_ID}:instance-profile/imprecise-deploy-instance-profile"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "secretsmanager:GetSecretValue",
         "secretsmanager:DescribeSecret"
       ],
-      "Resource": "arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:imprecise-*"
+      "Resource": [
+        "arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:imprecise-*",
+        "arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:rds!*"
+      ]
     },
     {
       "Effect": "Allow",
@@ -183,6 +210,50 @@ EOF
         "rds:DescribeDBInstances"
       ],
       "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets",
+        "route53:GetHostedZone",
+        "route53:ListHostedZones",
+        "route53:GetChange"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "acm:ListCertificates",
+        "acm:DescribeCertificate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations",
+        "ssm:StartSession",
+        "ssm:DescribeInstanceInformation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::imprecise-deployments",
+        "arn:aws:s3:::imprecise-deployments/*"
+      ]
     }
   ]
 }
