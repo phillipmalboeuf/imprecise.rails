@@ -46,8 +46,6 @@ gem 'sorbet', :group => :development
 gem 'sorbet-runtime'
 gem 'tapioca', require: false, :group => [:development, :test]
 
-gem "openai", "~> 0.43.0"
-
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
@@ -74,3 +72,6 @@ group :test do
 end
 
 gem "tailwindcss-rails", "~> 4.4"
+gem "openai", "~> 0.43.0"
+gem "graphql", "~> 2.5"
+gem "graphiql-rails", group: :development
