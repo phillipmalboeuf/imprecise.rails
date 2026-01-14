@@ -19,8 +19,8 @@
     <link rel="apple-touch-icon" href="/icon.png">
 
     <%# Includes all stylesheet files in app/assets/stylesheets %>
-    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
-    <%= javascript_importmap_tags %>
+    <%= stylesheet_link_tag :app %>
+    <%= javascript_include_tag "application", type: "module" %>
   </head>
 
   <body>
@@ -44,7 +44,9 @@
         </div>
       <% end %>
       
-      <%= yield %>
+      <div id="react-root">
+        <%= yield %>
+      </div>
     </main>
   </body>
 </html>

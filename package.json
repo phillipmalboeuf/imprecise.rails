@@ -1,0 +1,16 @@
+{
+  "name": "imprecise-rails",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild app/javascript/application.js --bundle --sourcemap --outfile=app/assets/builds/application.js --format=esm --jsx=automatic --loader:.js=jsx",
+    "build:css": "tailwindcss -i ./app/assets/stylesheets/application.css -o ./app/assets/builds/application.css --minify"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.0"
+  }
+}
