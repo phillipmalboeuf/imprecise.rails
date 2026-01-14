@@ -1,0 +1,450 @@
+name: Deploy Branch to AWS
+
+on:
+  push:
+    branches:
+      - '**'  # Trigger on push to any branch
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ca-central-1
+  RUBY_VERSION: 3.4.8
+  DOMAIN: impreciseanalysis.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # For OIDC authentication
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for branch detection
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get branch name
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            BRANCH_NAME="${{ github.event.inputs.branch }}"
+          else
+            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          fi
+          # Sanitize branch name for use in resource names (replace / with -)
+          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/\//-/g' | tr '[:upper:]' '[:lower:]')
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "sanitized_branch=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+          echo "Branch: $BRANCH_NAME"
+          echo "Sanitized: $SANITIZED_BRANCH"
+
+      - name: Get or create EC2 instance
+        id: instance
+        run: |
+          SANITIZED_BRANCH="${{ steps.branch.outputs.sanitized_branch }}"
+          
+          # Check if instance exists
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=imprecise-$SANITIZED_BRANCH" \
+                      "Name=instance-state-name,Values=running,stopped,stopping" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          
+          if [ "$INSTANCE_ID" == "None" ] || [ -z "$INSTANCE_ID" ]; then
+            echo "Creating new EC2 instance for branch: $SANITIZED_BRANCH"
+            
+            # Get default VPC and subnet
+            VPC_ID=$(aws ec2 describe-vpcs \
+              --filters "Name=isDefault,Values=true" \
+              --query 'Vpcs[0].VpcId' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            SUBNET_ID=$(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query 'Subnets[0].SubnetId' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            # Create security group if it doesn't exist
+            SG_ID=$(aws ec2 describe-security-groups \
+              --filters "Name=group-name,Values=imprecise-$SANITIZED_BRANCH-sg" \
+              --query 'SecurityGroups[0].GroupId' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            if [ "$SG_ID" == "None" ] || [ -z "$SG_ID" ]; then
+              SG_ID=$(aws ec2 create-security-group \
+                --group-name "imprecise-$SANITIZED_BRANCH-sg" \
+                --description "Security group for imprecise-$SANITIZED_BRANCH" \
+                --vpc-id "$VPC_ID" \
+                --region ${{ env.AWS_REGION }} \
+                --query 'GroupId' \
+                --output text)
+              
+              # Allow SSH and HTTP
+              aws ec2 authorize-security-group-ingress \
+                --group-id "$SG_ID" \
+                --protocol tcp \
+                --port 22 \
+                --cidr 0.0.0.0/0 \
+                --region ${{ env.AWS_REGION }}
+              
+              aws ec2 authorize-security-group-ingress \
+                --group-id "$SG_ID" \
+                --protocol tcp \
+                --port 80 \
+                --cidr 0.0.0.0/0 \
+                --region ${{ env.AWS_REGION }}
+              
+              aws ec2 authorize-security-group-ingress \
+                --group-id "$SG_ID" \
+                --protocol tcp \
+                --port 443 \
+                --cidr 0.0.0.0/0 \
+                --region ${{ env.AWS_REGION }}
+            fi
+            
+            # Get latest Ubuntu 22.04 LTS AMI
+            AMI_ID=$(aws ec2 describe-images \
+              --owners 099720109477 \
+              --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*" \
+                        "Name=state,Values=available" \
+              --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            # Prepare user data script
+            USER_DATA=$(cat << 'USERDATA_EOF'
+#!/bin/bash
+set -e
+apt-get update
+apt-get upgrade -y
+apt-get install -y curl wget git unzip software-properties-common apt-transport-https ca-certificates gnupg lsb-release
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ubuntu
+curl -fsSL https://github.com/basecamp/kamal/releases/latest/download/kamal-linux-amd64 -o /usr/local/bin/kamal
+chmod +x /usr/local/bin/kamal
+apt-get install -y postgresql-client
+mkdir -p /home/ubuntu/app
+chown ubuntu:ubuntu /home/ubuntu/app
+echo "EC2 instance setup completed at $(date)" >> /var/log/user-data.log
+USERDATA_EOF
+)
+            
+            # Create instance
+            INSTANCE_ID=$(aws ec2 run-instances \
+              --image-id "$AMI_ID" \
+              --instance-type t3.micro \
+              --subnet-id "$SUBNET_ID" \
+              --security-group-ids "$SG_ID" \
+              --associate-public-ip-address \
+              --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=imprecise-$SANITIZED_BRANCH},{Key=Branch,Value=${{ steps.branch.outputs.branch_name }}},{Key=Project,Value=imprecise}]" \
+              --iam-instance-profile Name=imprecise-deploy-instance-profile \
+              --user-data "$USER_DATA" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Instances[0].InstanceId' \
+              --output text)
+            
+            echo "Waiting for instance to be running..."
+            aws ec2 wait instance-running \
+              --instance-ids "$INSTANCE_ID" \
+              --region ${{ env.AWS_REGION }}
+            
+            echo "Waiting for instance to be ready..."
+            sleep 30
+          else
+            echo "Using existing instance: $INSTANCE_ID"
+            
+            # Start instance if stopped
+            STATE=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].State.Name' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            if [ "$STATE" == "stopped" ]; then
+              aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region ${{ env.AWS_REGION }}
+              aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region ${{ env.AWS_REGION }}
+              sleep 30
+            fi
+          fi
+          
+          # Get instance IP
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "Instance ID: $INSTANCE_ID"
+          echo "Instance IP: $INSTANCE_IP"
+
+      - name: Setup Route 53 DNS record
+        id: setup-dns
+        run: |
+          SANITIZED_BRANCH="${{ steps.branch.outputs.sanitized_branch }}"
+          INSTANCE_IP="${{ steps.instance.outputs.instance_ip }}"
+          
+          # Determine domain name
+          if [ "${{ steps.branch.outputs.branch_name }}" == "main" ]; then
+            DOMAIN_NAME="${{ env.DOMAIN }}"
+          else
+            DOMAIN_NAME="${SANITIZED_BRANCH}.${{ env.DOMAIN }}"
+          fi
+          
+          echo "domain_name=$DOMAIN_NAME" >> $GITHUB_OUTPUT
+          echo "Setting up DNS for: $DOMAIN_NAME -> $INSTANCE_IP"
+          
+          # Get hosted zone ID
+          HOSTED_ZONE_ID=$(aws route53 list-hosted-zones \
+            --query "HostedZones[?Name=='${{ env.DOMAIN }}.'].[Id]" \
+            --output text | cut -d'/' -f3)
+          
+          if [ -z "$HOSTED_ZONE_ID" ] || [ "$HOSTED_ZONE_ID" == "None" ]; then
+            echo "Warning: Hosted zone not found. Run scripts/setup-domain.sh first."
+            exit 1
+          fi
+          
+          # Create or update A record
+          CHANGE_BATCH=$(cat <<EOF
+{
+  "Changes": [{
+    "Action": "UPSERT",
+    "ResourceRecordSet": {
+      "Name": "$DOMAIN_NAME",
+      "Type": "A",
+      "TTL": 300,
+      "ResourceRecords": [{"Value": "$INSTANCE_IP"}]
+    }
+  }]
+}
+EOF
+)
+          
+          CHANGE_ID=$(aws route53 change-resource-record-sets \
+            --hosted-zone-id "$HOSTED_ZONE_ID" \
+            --change-batch "$CHANGE_BATCH" \
+            --query 'ChangeInfo.Id' \
+            --output text)
+          
+          echo "DNS record created/updated: $DOMAIN_NAME -> $INSTANCE_IP"
+          echo "Change ID: $CHANGE_ID"
+          
+          # Wait for DNS propagation (optional, but helpful)
+          echo "Waiting for DNS change to propagate..."
+          aws route53 wait resource-record-sets-changed --id "$CHANGE_ID"
+
+      - name: Setup instance for deployment
+        run: |
+          INSTANCE_IP="${{ steps.instance.outputs.instance_ip }}"
+          
+          # Wait for SSH to be available
+          echo "Waiting for SSH to be available..."
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$INSTANCE_IP exit 2>/dev/null; then
+              echo "SSH is available"
+              break
+            fi
+            echo "Attempt $i: SSH not ready yet..."
+            sleep 10
+          done
+          
+          # Setup instance
+          ssh -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << 'EOF'
+            # Install Docker and dependencies
+            sudo apt-get update
+            sudo apt-get install -y docker.io docker-compose git curl
+            sudo systemctl enable docker
+            sudo systemctl start docker
+            sudo usermod -aG docker ubuntu
+            
+            # Install Kamal
+            curl -fsSL https://github.com/basecamp/kamal/releases/latest/download/kamal-linux-amd64 -o /tmp/kamal
+            sudo install /tmp/kamal /usr/local/bin/kamal
+          EOF
+
+      - name: Get RAILS_MASTER_KEY from AWS Secrets Manager
+        id: master_key
+        run: |
+          MASTER_KEY=$(aws secretsmanager get-secret-value \
+            --secret-id imprecise-rails-master-key \
+            --query 'SecretString' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "::add-mask::$MASTER_KEY"
+          echo "master_key=$MASTER_KEY" >> $GITHUB_OUTPUT
+
+      - name: Get RDS endpoint and password
+        id: rds
+        run: |
+          RDS_INFO=$(aws rds describe-db-instances \
+            --db-instance-identifier postgres-standard \
+            --query 'DBInstances[0].[Endpoint.Address,MasterUserSecret.SecretArn]' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          
+          RDS_ENDPOINT=$(echo "$RDS_INFO" | awk '{print $1}')
+          RDS_SECRET_ARN=$(echo "$RDS_INFO" | awk '{print $2}')
+          
+          # Get master password from Secrets Manager
+          if [ -n "$RDS_SECRET_ARN" ] && [ "$RDS_SECRET_ARN" != "None" ]; then
+            RDS_PASSWORD=$(aws secretsmanager get-secret-value \
+              --secret-id "$RDS_SECRET_ARN" \
+              --query 'SecretString' \
+              --output text \
+              --region ${{ env.AWS_REGION }} | jq -r '.password // .')
+          else
+            # Fallback: try to get from a known secret name
+            RDS_PASSWORD=$(aws secretsmanager get-secret-value \
+              --secret-id imprecise-rds-password \
+              --query 'SecretString' \
+              --output text \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || echo "")
+          fi
+          
+          echo "rds_endpoint=$RDS_ENDPOINT" >> $GITHUB_OUTPUT
+          if [ -n "$RDS_PASSWORD" ]; then
+            echo "::add-mask::$RDS_PASSWORD"
+            echo "rds_password=$RDS_PASSWORD" >> $GITHUB_OUTPUT
+          else
+            echo "Warning: Could not retrieve RDS password. You may need to set it manually."
+            echo "rds_password=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get ACM certificate ARN
+        id: certificate
+        run: |
+          CERT_ARN=$(aws acm list-certificates \
+            --query "CertificateSummaryList[?DomainName=='${{ env.DOMAIN }}' || DomainName=='*.${{ env.DOMAIN }}'].[CertificateArn]" \
+            --output text \
+            --region us-east-1 | head -n1)
+          
+          if [ -z "$CERT_ARN" ] || [ "$CERT_ARN" == "None" ]; then
+            echo "Warning: ACM certificate not found. Run scripts/setup-domain.sh first."
+            echo "cert_arn=" >> $GITHUB_OUTPUT
+          else
+            echo "cert_arn=$CERT_ARN" >> $GITHUB_OUTPUT
+            echo "Using certificate: $CERT_ARN"
+          fi
+
+      - name: Configure Kamal for branch
+        id: kamal-config
+        run: |
+          SANITIZED_BRANCH="${{ steps.branch.outputs.sanitized_branch }}"
+          INSTANCE_IP="${{ steps.instance.outputs.instance_ip }}"
+          
+          # Determine domain name (use from DNS step if available, otherwise calculate)
+          if [ -n "${{ steps.setup-dns.outputs.domain_name }}" ]; then
+            DOMAIN_NAME="${{ steps.setup-dns.outputs.domain_name }}"
+          else
+            if [ "${{ steps.branch.outputs.branch_name }}" == "main" ]; then
+              DOMAIN_NAME="${{ env.DOMAIN }}"
+            else
+              DOMAIN_NAME="${SANITIZED_BRANCH}.${{ env.DOMAIN }}"
+            fi
+          fi
+          
+          echo "domain_name=$DOMAIN_NAME" >> $GITHUB_OUTPUT
+          
+          # Create branch-specific deploy config
+          cat > config/deploy.$SANITIZED_BRANCH.yml << EOF
+          service: imprecise-$SANITIZED_BRANCH
+          image: imprecise-$SANITIZED_BRANCH
+          
+          servers:
+            web:
+              - $INSTANCE_IP
+          
+          proxy:
+            ssl: true
+            host: $DOMAIN_NAME
+          
+          env:
+            secret:
+              - RAILS_MASTER_KEY
+              - DB_PASSWORD
+            clear:
+              RAILS_ENV: production
+              DB_HOST: ${{ steps.rds.outputs.rds_endpoint }}
+              DB_USERNAME: postgres
+              DB_DATABASE: imprecise_${SANITIZED_BRANCH}_production
+              DB_PORT: "5432"
+          
+          volumes:
+            - "imprecise_${SANITIZED_BRANCH}_storage:/rails/storage"
+          
+          asset_path: /rails/public/assets
+          
+          builder:
+            arch: amd64
+          EOF
+          
+          echo "Created deploy config for $DOMAIN_NAME"
+
+      - name: Setup Kamal secrets
+        run: |
+          mkdir -p .kamal
+          cat > .kamal/secrets << EOF
+          RAILS_MASTER_KEY=${{ steps.master_key.outputs.master_key }}
+          DB_PASSWORD=${{ steps.rds.outputs.rds_password }}
+          EOF
+          chmod 600 .kamal/secrets
+
+      - name: Deploy with Kamal
+        run: |
+          SANITIZED_BRANCH="${{ steps.branch.outputs.sanitized_branch }}"
+          INSTANCE_IP="${{ steps.instance.outputs.instance_ip }}"
+          
+          # Set up SSH key for Kamal
+          ssh-keyscan -H $INSTANCE_IP >> ~/.ssh/known_hosts
+          
+          # Deploy
+          bundle exec kamal deploy \
+            --config-file config/deploy.$SANITIZED_BRANCH.yml \
+            --destination $INSTANCE_IP \
+            --hosts $INSTANCE_IP
+
+      - name: Deployment summary
+        run: |
+          # Use domain from Kamal config step (which uses DNS step if available)
+          DOMAIN_NAME="${{ steps.kamal-config.outputs.domain_name }}"
+          
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ steps.branch.outputs.branch_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance ID**: ${{ steps.instance.outputs.instance_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance IP**: ${{ steps.instance.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Domain**: $DOMAIN_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy Config**: config/deploy.$SANITIZED_BRANCH.yml" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Access your application at:" >> $GITHUB_STEP_SUMMARY
+          echo "- **HTTPS**: https://$DOMAIN_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- **HTTP**: http://$DOMAIN_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- **Direct IP**: http://${{ steps.instance.outputs.instance_ip }}" >> $GITHUB_STEP_SUMMARY
