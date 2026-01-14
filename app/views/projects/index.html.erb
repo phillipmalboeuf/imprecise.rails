@@ -13,6 +13,7 @@
       <th>Owner</th>
       <th>Created At</th>
       <th>Updated At</th>
+      <th>Actions</th>
     </tr>
   </thead>
   <tbody>
@@ -27,6 +28,7 @@
           <td><%= project.owner&.email_address %></td>
           <td><%= project.created_at %></td>
           <td><%= project.updated_at %></td>
+          <td><%= link_to "Test", project_path(project), class: "btn btn-soft" %> <%= link_to "Edit", edit_project_path(project), class: "btn btn-soft" %></td>
         </tr>
       <% end %>
     <% else %>

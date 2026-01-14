@@ -1,14 +1,14 @@
 class QueriesController < ApplicationController
-  # Skip CSRF token verification for API requests (both JSON and multipart/form-data)
-  skip_before_action :verify_authenticity_token
-
   def create
     @query = Query.new(query_params)
 
     if @query.save
-      render json: @query.as_json(include: :project), status: :created
+      ai_response = AiAnalysisService.new(@query).call
+      @query.update(response: { content: ai_response }) if ai_response.present?
+
+      redirect_to project_path(@query.project_id), notice: "Query created successfully!"
     else
-      render json: { errors: @query.errors.full_messages }, status: :unprocessable_entity
+      redirect_to project_path(@query.project_id), alert: "Error: #{@query.errors.full_messages.join(', ')}"
     end
   end
 

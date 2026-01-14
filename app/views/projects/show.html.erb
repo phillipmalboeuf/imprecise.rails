@@ -1,0 +1,60 @@
+<h1 class="text-2xl font-bold mb-4"><%= @project.name %></h1>
+
+<div class="mb-4">
+  <p><strong>Prompt Type:</strong> <%= @project.prompt_type %></p>
+</div>
+
+<div class="mb-6">
+  <h2 class="text-xl font-semibold mb-3">Create Query</h2>
+  <%= form_with url: queries_path, method: :post, local: true, class: "space-y-4" do |form| %>
+    <%= form.hidden_field :project_id, value: @project.id %>
+    
+    <div>
+      <%= form.label :query, "Query", class: "label" %>
+      <%= form.text_area :query, required: true, class: "textarea textarea-bordered w-full", rows: 4, placeholder: "Enter your query..." %>
+    </div>
+    
+    <div>
+      <%= form.submit "Create Query", class: "btn btn-primary" %>
+    </div>
+  <% end %>
+</div>
+
+<% if @queries.any? %>
+  <div class="mb-6">
+    <h2 class="text-xl font-semibold mb-3">Query Responses</h2>
+    <div class="space-y-4">
+      <% @queries.each do |query| %>
+        <div class="card bg-base-100 shadow-md">
+          <div class="card-body">
+            <h3 class="card-title text-lg">Query</h3>
+            <p class="mb-3"><%= query.query %></p>
+            
+            <% if query.response.present? %>
+              <div class="mt-3">
+                <h4 class="font-semibold mb-2">Response:</h4>
+                <div class="bg-base-200 p-4 rounded">
+                  <% if query.response.is_a?(Hash) && query.response["content"] %>
+                    <p><%= query.response["content"] %></p>
+                  <% elsif query.response.is_a?(String) %>
+                    <p><%= query.response %></p>
+                  <% else %>
+                    <pre><%= JSON.pretty_generate(query.response) %></pre>
+                  <% end %>
+                </div>
+              </div>
+            <% else %>
+              <p class="text-gray-500 italic">Processing...</p>
+            <% end %>
+            
+            <div class="text-sm text-gray-500 mt-2">
+              Created: <%= query.created_at.strftime("%B %d, %Y at %I:%M %p") %>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% end %>
+
+<%= link_to "Back to Projects", projects_path, class: "btn btn-soft" %>

@@ -3,6 +3,11 @@ class ProjectsController < ApplicationController
     @projects = Current.user.projects.includes(:owner)
   end
 
+  def show
+    @project = Current.user.projects.find(params[:id])
+    @queries = @project.queries.order(created_at: :desc)
+  end
+
   def new
     @project = Project.new
   end

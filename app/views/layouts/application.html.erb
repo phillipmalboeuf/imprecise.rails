@@ -32,6 +32,18 @@
     </nav>
 
     <main class="p-4">
+      <% if notice %>
+        <div class="alert alert-success mb-4">
+          <span><%= notice %></span>
+        </div>
+      <% end %>
+      
+      <% if alert %>
+        <div class="alert alert-error mb-4">
+          <span><%= alert %></span>
+        </div>
+      <% end %>
+      
       <%= yield %>
     </main>
   </body>
