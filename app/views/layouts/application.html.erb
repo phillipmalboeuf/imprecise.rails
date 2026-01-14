@@ -25,7 +25,7 @@
 
   <body>
     <nav class="navbar">
-      <ul class="menu menu-horizontal">
+      <ul class="menu menu-horizontal flex items-center justify-center">
         <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
         <li><%= button_to "Log out", session_path, method: :delete, class: "btn btn-sm btn-soft" if authenticated? %></li>
       </ul>
@@ -44,8 +44,10 @@
         </div>
       <% end %>
       
+      
+      <%= yield %>
+
       <div id="react-root">
-        <%= yield %>
       </div>
     </main>
   </body>

@@ -1,3 +1,4 @@
-@import "https://cdn.jsdelivr.net/npm/daisyui@5";
-@import "https://cdn.jsdelivr.net/npm/daisyui@5/themes.css";
 @import "tailwindcss";
+@plugin "daisyui" {
+  themes: silk;
+}
