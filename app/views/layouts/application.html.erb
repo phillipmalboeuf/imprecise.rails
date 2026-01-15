@@ -19,13 +19,13 @@
     <link rel="apple-touch-icon" href="/icon.png">
 
     <%# Includes all stylesheet files in app/assets/stylesheets %>
-    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
-    <%= javascript_importmap_tags %>
+    <%= stylesheet_link_tag :app %>
+    <%= javascript_include_tag "application", type: "module" %>
   </head>
 
   <body>
     <nav class="navbar">
-      <ul class="menu menu-horizontal">
+      <ul class="menu menu-horizontal flex items-center justify-center">
         <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
         <li><%= button_to "Log out", session_path, method: :delete, class: "btn btn-sm btn-soft" if authenticated? %></li>
       </ul>
@@ -44,7 +44,11 @@
         </div>
       <% end %>
       
+      
       <%= yield %>
+
+      <div id="react-root">
+      </div>
     </main>
   </body>
 </html>
