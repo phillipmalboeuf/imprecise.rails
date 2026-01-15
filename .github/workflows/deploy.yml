@@ -8,6 +8,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: "!startsWith(github.ref, 'refs/heads/tests/')"
     
     steps:
       - name: Checkout code

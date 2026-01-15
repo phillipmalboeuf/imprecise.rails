@@ -7,13 +7,12 @@
     "build:css": "tailwindcss -i ./app/assets/stylesheets/application.css -o ./app/assets/builds/application.css --minify"
   },
   "dependencies": {
+    "daisyui": "^5.5.14",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "daisyui": "^5.5.14",
     "tailwindcss": "^4.0.0"
   },
   "devDependencies": {
-    
-    "esbuild": "^0.19.0"
+    "esbuild": "^0.27.2"
   }
 }

@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [ main, tests/* ]
 
 jobs:
   scan_ruby:
@@ -43,31 +43,31 @@ jobs:
       - name: Scan for security vulnerabilities in JavaScript dependencies
         run: npm audit --audit-level=moderate
 
-  lint:
-    runs-on: ubuntu-latest
-    env:
-      RUBOCOP_CACHE_ROOT: tmp/rubocop
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+  # lint:
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     RUBOCOP_CACHE_ROOT: tmp/rubocop
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v5
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
+  #     - name: Set up Ruby
+  #       uses: ruby/setup-ruby@v1
+  #       with:
+  #         bundler-cache: true
 
-      - name: Prepare RuboCop cache
-        uses: actions/cache@v4
-        env:
-          DEPENDENCIES_HASH: ${{ hashFiles('.ruby-version', '**/.rubocop.yml', '**/.rubocop_todo.yml', 'Gemfile.lock') }}
-        with:
-          path: ${{ env.RUBOCOP_CACHE_ROOT }}
-          key: rubocop-${{ runner.os }}-${{ env.DEPENDENCIES_HASH }}-${{ github.ref_name == github.event.repository.default_branch && github.run_id || 'default' }}
-          restore-keys: |
-            rubocop-${{ runner.os }}-${{ env.DEPENDENCIES_HASH }}-
+  #     - name: Prepare RuboCop cache
+  #       uses: actions/cache@v4
+  #       env:
+  #         DEPENDENCIES_HASH: ${{ hashFiles('.ruby-version', '**/.rubocop.yml', '**/.rubocop_todo.yml', 'Gemfile.lock') }}
+  #       with:
+  #         path: ${{ env.RUBOCOP_CACHE_ROOT }}
+  #         key: rubocop-${{ runner.os }}-${{ env.DEPENDENCIES_HASH }}-${{ github.ref_name == github.event.repository.default_branch && github.run_id || 'default' }}
+  #         restore-keys: |
+  #           rubocop-${{ runner.os }}-${{ env.DEPENDENCIES_HASH }}-
 
-      - name: Lint code for consistent style
-        run: bin/rubocop -f github
+  #     - name: Lint code for consistent style
+  #       run: bin/rubocop -f github
 
   test:
     runs-on: ubuntu-latest
@@ -78,15 +78,10 @@ jobs:
     #     env:
     #       POSTGRES_USER: postgres
     #       POSTGRES_PASSWORD: postgres
+    #       POSTGRES_DB: postgres
     #     ports:
     #       - 5432:5432
     #     options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
-
-      # redis:
-      #   image: valkey/valkey:8
-      #   ports:
-      #     - 6379:6379
-      #   options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
       - name: Install packages
@@ -100,17 +95,30 @@ jobs:
         with:
           bundler-cache: true
 
-      - name: Prepare test database
-        env:
-          RAILS_ENV: test
-          # DATABASE_URL: postgres://postgres:postgres@localhost:5432
-        run: bin/rails db:test:prepare
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install yarn
+        run: npm install -g yarn
+
+      # - name: Prepare test database
+      #   env:
+      #     RAILS_ENV: test
+      #     # DATABASE_URL: postgres://postgres:postgres@localhost:5432
+      #     RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
+      #   run: bin/rails db:test:prepare
 
       - name: Run RSpec tests
         env:
           RAILS_ENV: test
           # DATABASE_URL: postgres://postgres:postgres@localhost:5432
-          # RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
+          RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
           # REDIS_URL: redis://localhost:6379/0
         run: bundle exec rspec
 

@@ -102,21 +102,60 @@ production:
     <% if ENV["CACHE_DATABASE_URL"] %>
     url: <%= ENV["CACHE_DATABASE_URL"] %>
     <% else %>
-    url: <%= ENV["DATABASE_URL"].sub(%r{/([^/]+)$}, '/\1_cache') %>
+    <% 
+      require 'uri'
+      db_url = ENV["DATABASE_URL"]
+      if db_url
+        uri = URI.parse(db_url)
+        if uri.path && uri.path.length > 1
+          uri.path = uri.path.sub(%r{/([^/]+)$}, '/\1_cache')
+        else
+          uri.path = '/cache'
+        end
+        db_url = uri.to_s
+      end
+    %>
+    url: <%= db_url %>
     <% end %>
     migrations_paths: db/cache_migrate
   queue:
     <% if ENV["QUEUE_DATABASE_URL"] %>
     url: <%= ENV["QUEUE_DATABASE_URL"] %>
     <% else %>
-    url: <%= ENV["DATABASE_URL"].sub(%r{/([^/]+)$}, '/\1_queue') %>
+    <% 
+      require 'uri'
+      db_url = ENV["DATABASE_URL"]
+      if db_url
+        uri = URI.parse(db_url)
+        if uri.path && uri.path.length > 1
+          uri.path = uri.path.sub(%r{/([^/]+)$}, '/\1_queue')
+        else
+          uri.path = '/queue'
+        end
+        db_url = uri.to_s
+      end
+    %>
+    url: <%= db_url %>
     <% end %>
     migrations_paths: db/queue_migrate
   cable:
     <% if ENV["CABLE_DATABASE_URL"] %>
     url: <%= ENV["CABLE_DATABASE_URL"] %>
     <% else %>
-    url: <%= ENV["DATABASE_URL"].sub(%r{/([^/]+)$}, '/\1_cable') %>
+    <% 
+      require 'uri'
+      db_url = ENV["DATABASE_URL"]
+      if db_url
+        uri = URI.parse(db_url)
+        if uri.path && uri.path.length > 1
+          uri.path = uri.path.sub(%r{/([^/]+)$}, '/\1_cable')
+        else
+          uri.path = '/cable'
+        end
+        db_url = uri.to_s
+      end
+    %>
+    url: <%= db_url %>
     <% end %>
     migrations_paths: db/cable_migrate
   <% else %>

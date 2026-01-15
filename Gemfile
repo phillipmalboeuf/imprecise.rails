@@ -50,7 +50,7 @@ group :development, :test do
   gem "bundler-audit", require: false
 
   # Static analysis for security vulnerabilities [https://brakemanscanner.org/]
-  gem "brakeman", require: false
+  gem "brakeman", "~> 7.1.2", require: false
 
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
@@ -73,3 +73,6 @@ gem "tailwindcss-rails", "~> 4.4"
 gem "openai", "~> 0.43.0"
 gem "graphql", "~> 2.5"
 gem "graphiql-rails", group: :development
+
+# Fix stored XSS vulnerability in Trix through attachment attribute
+gem "action_text-trix", ">= 2.1.16"
