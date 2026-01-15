@@ -40,7 +40,7 @@ gem "image_processing", "~> 1.2"
 
 gem 'sorbet', :group => :development
 gem 'sorbet-runtime'
-gem 'tapioca', require: false, :group => [:development, :test]
+gem 'tapioca', '~> 0.17', require: false, :group => [:development, :test]
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem

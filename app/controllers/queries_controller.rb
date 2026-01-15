@@ -1,3 +1,6 @@
+# typed: true
+# frozen_string_literal: true
+
 class QueriesController < ApplicationController
   def create
     @query = Query.new(query_params)

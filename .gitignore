@@ -55,8 +55,9 @@ node_modules/
 !.yarn/releases
 !.yarn/versions
 
-# Ignore Sorbet files
-sorbet/
+# Ignore Sorbet generated files (but keep config)
+sorbet/rbi/
+sorbet/tmp/
 
 # Ignore IDE files
 .vscode/

@@ -1,3 +1,6 @@
+# typed: true
+# frozen_string_literal: true
+
 class AiAnalysisService
   def initialize(query)
     @query = query

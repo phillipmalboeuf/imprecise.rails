@@ -1,0 +1,5 @@
+--dir
+.
+--disable-watchman
+--suppress-payload-superclass-redefinition-for=Net::IMAP::CommandData
+--suppress-payload-superclass-redefinition-for=RDoc::Markup::Heading

@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Sorbet type checker wrapper
+# Usage: bin/sorbet [options]
+
+require "bundler/setup"
+load Gem.bin_path("sorbet-static", "sorbet")

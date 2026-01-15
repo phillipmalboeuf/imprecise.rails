@@ -1,0 +1,21 @@
+# Tapioca configuration file
+# See https://github.com/Shopify/tapioca for more information
+
+gem:
+  # Generate RBI files for all gems
+  exclude:
+    - rails # We'll use tapioca rails for Rails-specific DSLs
+  doc: true
+  typed_overrides:
+    # Override gem typing if needed
+    {}
+
+dsl:
+  # Generate RBI files for Rails DSLs
+  exclude:
+    - rails/initializer
+  outdir: sorbet/rbi/dsl
+
+require:
+  # Files to require before generating RBIs
+  - config/application
