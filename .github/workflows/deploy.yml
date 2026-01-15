@@ -1,0 +1,582 @@
+name: Deploy to Dokku
+
+on:
+  push:
+    branches:
+      - '**'  # Deploy all branches
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # Fetch all history for git push
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DOKKU_SSH_PRIVATE_KEY }}" > ~/.ssh/dokku_deploy_key
+          chmod 600 ~/.ssh/dokku_deploy_key
+
+      - name: Determine instance name from branch
+        id: instance_name
+        run: |
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          # Sanitize branch name for instance name (lowercase, replace / with -)
+          INSTANCE_NAME=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+          # Ensure it starts with a letter and is valid
+          if [[ ! "$INSTANCE_NAME" =~ ^[a-z] ]]; then
+            INSTANCE_NAME="app-$INSTANCE_NAME"
+          fi
+          # Add prefix to avoid conflicts
+          INSTANCE_NAME="dokku-${INSTANCE_NAME}"
+          echo "name=$INSTANCE_NAME" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+      - name: Check if EC2 instance exists
+        id: check_instance
+        run: |
+          INSTANCE_NAME="${{ steps.instance_name.outputs.name }}"
+          INSTANCE_INFO=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=running,stopped,stopping" \
+            --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' \
+            --output text | head -n 1)
+          
+          if [ -n "$INSTANCE_INFO" ] && [ "$INSTANCE_INFO" != "None" ]; then
+            INSTANCE_ID=$(echo $INSTANCE_INFO | awk '{print $1}')
+            INSTANCE_STATE=$(echo $INSTANCE_INFO | awk '{print $2}')
+            
+            # Check if the instance has a key pair
+            INSTANCE_KEY=$(aws ec2 describe-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].KeyName' \
+              --output text 2>/dev/null || echo "None")
+            
+            if [ "$INSTANCE_KEY" == "None" ] || [ -z "$INSTANCE_KEY" ]; then
+              aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" || true
+              aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" || true
+              echo "exists=false" >> $GITHUB_OUTPUT
+            else
+              echo "exists=true" >> $GITHUB_OUTPUT
+              echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+              echo "instance_state=$INSTANCE_STATE" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Start stopped instance if needed
+        if: steps.check_instance.outputs.exists == 'true' && steps.check_instance.outputs.instance_state == 'stopped'
+        run: |
+          aws ec2 start-instances --instance-ids "${{ steps.check_instance.outputs.instance_id }}"
+          aws ec2 wait instance-running --instance-ids "${{ steps.check_instance.outputs.instance_id }}"
+
+      - name: Launch EC2 instance from Dokku AMI
+        if: steps.check_instance.outputs.exists == 'false'
+        id: launch_instance
+        run: |
+          INSTANCE_NAME="${{ steps.instance_name.outputs.name }}"
+          AMI_ID="${{ secrets.DOKKU_AMI_ID }}"
+          INSTANCE_TYPE="${{ secrets.AWS_INSTANCE_TYPE || 't3.small' }}"
+          KEY_NAME="${{ secrets.AWS_KEY_PAIR_NAME }}"
+          SECURITY_GROUP_ID="${{ secrets.AWS_SECURITY_GROUP_ID }}"
+          SUBNET_ID="${{ secrets.AWS_SUBNET_ID }}"
+          
+          KEY_NAME=$(echo "$KEY_NAME" | xargs)
+          AWS_REGION="${{ secrets.AWS_REGION || 'us-east-1' }}"
+          
+          if [ -z "$KEY_NAME" ]; then
+            echo "ERROR: AWS_KEY_PAIR_NAME secret is required"
+            exit 1
+          fi
+          
+          # Validate key pair exists
+          if ! aws ec2 describe-key-pairs --key-names "$KEY_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "ERROR: Key pair '$KEY_NAME' does not exist in region $AWS_REGION"
+            exit 1
+          fi
+          
+          LAUNCH_ARGS=(
+            ec2 run-instances
+            --image-id "$AMI_ID"
+            --instance-type "$INSTANCE_TYPE"
+            --key-name "$KEY_NAME"
+            --region "$AWS_REGION"
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME},{Key=Branch,Value=${{ steps.instance_name.outputs.branch }}}]"
+          )
+          
+          if [ -n "$SECURITY_GROUP_ID" ]; then
+            LAUNCH_ARGS+=(--security-group-ids "$SECURITY_GROUP_ID")
+          fi
+          
+          if [ -n "$SUBNET_ID" ]; then
+            LAUNCH_ARGS+=(--subnet-id "$SUBNET_ID")
+            AUTO_PUBLIC_IP=$(aws ec2 describe-subnets --subnet-ids "$SUBNET_ID" \
+              --query 'Subnets[0].MapPublicIpOnLaunch' --output text 2>/dev/null || echo "false")
+            if [ "$AUTO_PUBLIC_IP" != "true" ]; then
+              LAUNCH_ARGS+=(--associate-public-ip-address)
+            fi
+          else
+            LAUNCH_ARGS+=(--associate-public-ip-address)
+          fi
+          
+          INSTANCE_ID=$(aws "${LAUNCH_ARGS[@]}" --query 'Instances[0].InstanceId' --output text)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" == "None" ]; then
+            echo "ERROR: Failed to launch instance"
+            exit 1
+          fi
+          
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+
+      - name: Get instance details
+        id: instance_details
+        run: |
+          if [ "${{ steps.check_instance.outputs.exists }}" == "true" ]; then
+            INSTANCE_ID="${{ steps.check_instance.outputs.instance_id }}"
+          else
+            INSTANCE_ID="${{ steps.launch_instance.outputs.instance_id }}"
+          fi
+          
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          
+          PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          
+          if [ "$PUBLIC_IP" == "None" ] || [ -z "$PUBLIC_IP" ]; then
+            PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID \
+              --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text)
+          fi
+          
+          echo "instance_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      - name: Check and configure security group ports
+        run: |
+          INSTANCE_ID="${{ steps.instance_details.outputs.instance_id }}"
+          SECURITY_GROUP_ID="${{ secrets.AWS_SECURITY_GROUP_ID }}"
+          AWS_REGION="${{ secrets.AWS_REGION || 'us-east-1' }}"
+          
+          if [ -z "$SECURITY_GROUP_ID" ]; then
+            SECURITY_GROUP_ID=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID \
+              --region "$AWS_REGION" --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
+          fi
+          
+          aws ec2 authorize-security-group-ingress --group-id "$SECURITY_GROUP_ID" \
+            --protocol tcp --port 80 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+          aws ec2 authorize-security-group-ingress --group-id "$SECURITY_GROUP_ID" \
+            --protocol tcp --port 443 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+
+      - name: Setup SSH key for deployment
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.DOKKU_SSH_PRIVATE_KEY }}" > ~/.ssh/dokku_deploy_key
+          chmod 600 ~/.ssh/dokku_deploy_key
+
+      - name: Wait for instance to be ready
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          SSH_READY=false
+          for i in {1..60}; do
+            if ssh $SSH_OPTS ubuntu@$INSTANCE_IP "echo 'ready'" 2>/dev/null; then
+              SSH_READY=true
+              break
+            fi
+            sleep 5
+          done
+          
+          if [ "$SSH_READY" != "true" ]; then
+            echo "ERROR: SSH connection failed"
+            exit 1
+          fi
+
+      - name: Setup SSH for Dokku
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            PUBLIC_KEY=$(ssh-keygen -y -f "$HOME/.ssh/dokku_deploy_key" 2>/dev/null || echo "")
+            if [ -n "$PUBLIC_KEY" ]; then
+              echo "$PUBLIC_KEY" | ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku sshcommand:add-key github-actions" 2>/dev/null || \
+              echo "$PUBLIC_KEY" | ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo bash -c 'echo \"$PUBLIC_KEY\" >> /home/dokku/.ssh/authorized_keys'" 2>/dev/null || true
+            fi
+          fi
+          
+          if [ -n "${{ secrets.GITHUB_SSH_PUBLIC_KEY }}" ]; then
+            echo "${{ secrets.GITHUB_SSH_PUBLIC_KEY }}" | ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku sshcommand:add-key github-repo" 2>/dev/null || true
+          fi
+
+      - name: Determine app name from branch
+        id: app_name
+        run: |
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          # Sanitize branch name for Dokku app name (lowercase, replace / with -)
+          APP_NAME=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+          # Ensure it starts with a letter and is valid
+          if [[ ! "$APP_NAME" =~ ^[a-z] ]]; then
+            APP_NAME="app-$APP_NAME"
+          fi
+          echo "name=$APP_NAME" >> $GITHUB_OUTPUT
+
+      - name: Check if Dokku app exists
+        id: check_app
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          if ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku apps:exists $APP_NAME" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+          
+
+      - name: Create Dokku app if it doesn't exist
+        if: steps.check_app.outputs.exists == 'false'
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku apps:create $APP_NAME"
+          
+      - name: Create or get RDS database
+        id: rds_database
+        run: |
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          AWS_REGION="${{ secrets.AWS_REGION || 'us-east-1' }}"
+          
+          # Sanitize app name for RDS identifier (RDS has stricter naming rules)
+          # RDS identifiers: 1-63 alphanumeric characters, first must be a letter
+          RDS_IDENTIFIER=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+          if [[ ! "$RDS_IDENTIFIER" =~ ^[a-z] ]]; then
+            RDS_IDENTIFIER="db-$RDS_IDENTIFIER"
+          fi
+          # Limit to 63 characters (RDS limit)
+          RDS_IDENTIFIER="${RDS_IDENTIFIER:0:63}"
+          
+          # Database name within the instance
+          DB_NAME="${APP_NAME//-/_}"  # Replace hyphens with underscores for database name
+          DB_NAME="${DB_NAME:0:63}"  # Limit to 63 characters
+          
+          # Check if RDS instance already exists
+          EXISTING_INSTANCE=$(aws rds describe-db-instances \
+            --db-instance-identifier "$RDS_IDENTIFIER" \
+            --region "$AWS_REGION" \
+            --query 'DBInstances[0].DBInstanceIdentifier' \
+            --output text 2>/dev/null || echo "None")
+          
+          if [ "$EXISTING_INSTANCE" != "None" ] && [ -n "$EXISTING_INSTANCE" ]; then
+            DB_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier "$RDS_IDENTIFIER" \
+              --region "$AWS_REGION" --query 'DBInstances[0].Endpoint.Address' --output text)
+            DB_PORT=$(aws rds describe-db-instances --db-instance-identifier "$RDS_IDENTIFIER" \
+              --region "$AWS_REGION" --query 'DBInstances[0].Endpoint.Port' --output text || echo "5432")
+            DB_STATUS=$(aws rds describe-db-instances --db-instance-identifier "$RDS_IDENTIFIER" \
+              --region "$AWS_REGION" --query 'DBInstances[0].DBInstanceStatus' --output text || echo "unknown")
+            
+            if [ "$DB_STATUS" != "available" ]; then
+              aws rds wait db-instance-available --db-instance-identifier "$RDS_IDENTIFIER" --region "$AWS_REGION" || true
+            fi
+            
+            echo "rds_endpoint=$DB_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "rds_port=$DB_PORT" >> $GITHUB_OUTPUT
+            echo "rds_identifier=$RDS_IDENTIFIER" >> $GITHUB_OUTPUT
+            echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+            echo "rds_exists=true" >> $GITHUB_OUTPUT
+          else
+            RDS_INSTANCE_CLASS="${{ secrets.AWS_RDS_INSTANCE_CLASS || 'db.t3.micro' }}"
+            RDS_ENGINE_VERSION="${{ secrets.AWS_RDS_ENGINE_VERSION || '18.1' }}"
+            RDS_ALLOCATED_STORAGE="${{ secrets.AWS_RDS_ALLOCATED_STORAGE || '20' }}"
+            RDS_MASTER_USERNAME="${{ secrets.AWS_RDS_MASTER_USERNAME || 'postgres' }}"
+            RDS_MASTER_PASSWORD="${{ secrets.AWS_RDS_MASTER_PASSWORD }}"
+            RDS_SUBNET_GROUP="${{ secrets.AWS_RDS_SUBNET_GROUP }}"
+            RDS_SECURITY_GROUP="${{ secrets.AWS_RDS_SECURITY_GROUP }}"
+            RDS_VPC_SECURITY_GROUP_IDS="${{ secrets.AWS_RDS_VPC_SECURITY_GROUP_IDS }}"
+            
+            if [ -z "$RDS_MASTER_PASSWORD" ]; then
+              echo "ERROR: AWS_RDS_MASTER_PASSWORD secret is required"
+              exit 1
+            fi
+            
+            CREATE_ARGS=(
+              rds create-db-instance
+              --db-instance-identifier "$RDS_IDENTIFIER"
+              --db-instance-class "$RDS_INSTANCE_CLASS"
+              --engine postgres
+              --engine-version "$RDS_ENGINE_VERSION"
+              --master-username "$RDS_MASTER_USERNAME"
+              --master-user-password "$RDS_MASTER_PASSWORD"
+              --allocated-storage "$RDS_ALLOCATED_STORAGE"
+              --storage-type gp3
+              --backup-retention-period 7
+              --region "$AWS_REGION"
+              --tags "Key=Name,Value=$RDS_IDENTIFIER" "Key=Branch,Value=$BRANCH_NAME" "Key=App,Value=$APP_NAME"
+            )
+            
+            if [ -n "$RDS_SUBNET_GROUP" ]; then
+              CREATE_ARGS+=(--db-subnet-group-name "$RDS_SUBNET_GROUP")
+            fi
+            
+            if [ -n "$RDS_VPC_SECURITY_GROUP_IDS" ]; then
+              IFS=',' read -ra SG_ARRAY <<< "$RDS_VPC_SECURITY_GROUP_IDS"
+              for sg in "${SG_ARRAY[@]}"; do
+                CREATE_ARGS+=(--vpc-security-group-ids "$sg")
+              done
+            elif [ -n "$RDS_SECURITY_GROUP" ]; then
+              CREATE_ARGS+=(--vpc-security-group-ids "$RDS_SECURITY_GROUP")
+            fi
+            
+            aws "${CREATE_ARGS[@]}"
+            aws rds wait db-instance-available --db-instance-identifier "$RDS_IDENTIFIER" --region "$AWS_REGION" || true
+            
+            DB_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier "$RDS_IDENTIFIER" \
+              --region "$AWS_REGION" --query 'DBInstances[0].Endpoint.Address' --output text)
+            DB_PORT=$(aws rds describe-db-instances --db-instance-identifier "$RDS_IDENTIFIER" \
+              --region "$AWS_REGION" --query 'DBInstances[0].Endpoint.Port' --output text || echo "5432")
+            
+            if [ -z "$DB_ENDPOINT" ]; then
+              echo "ERROR: Could not get RDS endpoint"
+              exit 1
+            fi
+            
+            echo "rds_endpoint=$DB_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "rds_port=$DB_PORT" >> $GITHUB_OUTPUT
+            echo "rds_identifier=$RDS_IDENTIFIER" >> $GITHUB_OUTPUT
+            echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+            echo "rds_exists=false" >> $GITHUB_OUTPUT
+            echo "rds_master_username=$RDS_MASTER_USERNAME" >> $GITHUB_OUTPUT
+          fi
+          
+
+      - name: Configure domain
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          # Determine domain based on branch
+          if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
+            DOMAIN="${{ secrets.DOKKU_DOMAIN }}"
+          else
+            # For other branches, use branch name as subdomain
+            SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+            DOMAIN="${SANITIZED_BRANCH}.${{ secrets.DOKKU_DOMAIN }}"
+          fi
+          
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku domains:set $APP_NAME $DOMAIN"
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku ports:clear $APP_NAME" 2>/dev/null || true
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku ports:set $APP_NAME http:80:5000 https:443:5000" 2>/dev/null || true
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku proxy:enable $APP_NAME" 2>/dev/null || true
+          
+      - name: Setup Let's Encrypt SSL
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          INSTANCE_ID="${{ steps.instance_details.outputs.instance_id }}"
+          AWS_REGION="${{ secrets.AWS_REGION || 'us-east-1' }}"
+          
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          # Determine domain
+          if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
+            DOMAIN="${{ secrets.DOKKU_DOMAIN }}"
+          else
+            SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+            DOMAIN="${SANITIZED_BRANCH}.${{ secrets.DOKKU_DOMAIN }}"
+          fi
+          
+          LETSENCRYPT_EMAIL="${{ secrets.LETSENCRYPT_EMAIL }}"
+          if [ -z "$LETSENCRYPT_EMAIL" ]; then
+            exit 0
+          fi
+          
+          # Install plugin if needed
+          if ! ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku plugin:installed letsencrypt" 2>/dev/null; then
+            ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku plugin:install https://github.com/dokku/dokku-letsencrypt.git"
+          fi
+          
+          # Configure Let's Encrypt
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:set --global email $LETSENCRYPT_EMAIL" 2>/dev/null || true
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:enable $APP_NAME" 2>/dev/null || \
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:renew $APP_NAME" 2>/dev/null || true
+          
+          # Configure security group
+          INSTANCE_SG_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" \
+            --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
+          aws ec2 authorize-security-group-ingress --group-id "$INSTANCE_SG_ID" --protocol tcp --port 80 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+          aws ec2 authorize-security-group-ingress --group-id "$INSTANCE_SG_ID" --protocol tcp --port 443 --cidr 0.0.0.0/0 --region "$AWS_REGION" 2>/dev/null || true
+
+      - name: Configure Route 53 DNS
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          
+          # Get hosted zone ID (from secret or auto-detect)
+          HOSTED_ZONE_ID="${{ secrets.ROUTE53_HOSTED_ZONE_ID }}"
+          if [ -z "$HOSTED_ZONE_ID" ]; then
+            HOSTED_ZONE_ID=$(aws route53 list-hosted-zones --query "HostedZones[?Name=='impreciseanalysis.com.'].[Id]" --output text | head -1 | sed 's|/hostedzone/||')
+          fi
+          
+          if [ -z "$HOSTED_ZONE_ID" ]; then
+            exit 0
+          fi
+          
+          if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
+            RECORD_NAME="impreciseanalysis.com"
+          else
+            SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+            RECORD_NAME="${SANITIZED_BRANCH}.impreciseanalysis.com"
+          fi
+          
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id "$HOSTED_ZONE_ID" \
+            --change-batch "{
+              \"Changes\": [{
+                \"Action\": \"UPSERT\",
+                \"ResourceRecordSet\": {
+                  \"Name\": \"$RECORD_NAME\",
+                  \"Type\": \"A\",
+                  \"TTL\": 300,
+                  \"ResourceRecords\": [{\"Value\": \"$INSTANCE_IP\"}]
+                }
+              }]
+            }"
+
+
+
+
+      - name: Configure environment variables
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku config:set $APP_NAME RAILS_ENV=production --no-restart"
+          
+          if [ -n "${{ secrets.RAILS_MASTER_KEY }}" ]; then
+            ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku config:set $APP_NAME RAILS_MASTER_KEY='${{ secrets.RAILS_MASTER_KEY }}' --no-restart"
+          fi
+          
+          SECRET_KEY_BASE="${{ secrets.SECRET_KEY_BASE }}"
+          if [ -z "$SECRET_KEY_BASE" ]; then
+            SECRET_KEY_BASE=$(openssl rand -hex 64)
+          fi
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku config:set $APP_NAME SECRET_KEY_BASE='$SECRET_KEY_BASE' --no-restart"
+          
+          RDS_ENDPOINT="${{ steps.rds_database.outputs.rds_endpoint }}"
+          RDS_PORT="${{ steps.rds_database.outputs.rds_port }}"
+          DB_NAME="${{ steps.rds_database.outputs.db_name }}"
+          RDS_MASTER_USERNAME="${{ steps.rds_database.outputs.rds_master_username || secrets.AWS_RDS_MASTER_USERNAME || 'postgres' }}"
+          RDS_MASTER_PASSWORD="${{ secrets.AWS_RDS_MASTER_PASSWORD }}"
+          
+          if [ -z "$RDS_ENDPOINT" ] || [ -z "$RDS_MASTER_PASSWORD" ]; then
+            echo "ERROR: RDS configuration missing"
+            exit 1
+          fi
+          
+          DATABASE_URL="postgresql://${RDS_MASTER_USERNAME}:${RDS_MASTER_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/${DB_NAME}"
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku config:set $APP_NAME DATABASE_URL='$DATABASE_URL' --no-restart"
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku run $APP_NAME psql 'postgresql://${RDS_MASTER_USERNAME}:${RDS_MASTER_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/postgres' -c \"CREATE DATABASE $DB_NAME;\" 2>&1" || true
+
+      - name: Push to Dokku
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          
+          GIT_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            GIT_SSH_OPTS="$GIT_SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          git remote remove dokku 2>/dev/null || true
+          git remote add dokku dokku@$INSTANCE_IP:$APP_NAME
+          export GIT_SSH_COMMAND="ssh $GIT_SSH_OPTS"
+          git push dokku "$BRANCH_NAME:master" --force
+
+      - name: Run database migrations
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku run $APP_NAME bundle exec rails db:migrate" || true
+
+
+      - name: Deployment summary
+        run: |
+          INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+          INSTANCE_ID="${{ steps.instance_details.outputs.instance_id }}"
+          APP_NAME="${{ steps.app_name.outputs.name }}"
+          BRANCH_NAME="${{ steps.instance_name.outputs.branch }}"
+          
+          echo "## Deployment Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance ID:** $INSTANCE_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instance IP:** $INSTANCE_IP" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Name:** $APP_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
+          
+          # Get domain
+          # Set up SSH options with the key
+          SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+            SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+          fi
+          
+          DOMAIN=$(ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku domains:report $APP_NAME" 2>/dev/null | grep "Domains app vhosts:" | awk '{print $4}' || \
+                   echo "Not configured")
+          echo "- **Domain:** $DOMAIN" >> $GITHUB_STEP_SUMMARY
