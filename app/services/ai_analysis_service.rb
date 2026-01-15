@@ -2,6 +2,9 @@
 # frozen_string_literal: true
 
 class AiAnalysisService
+  extend T::Sig
+
+  sig { params(query: Query).void }
   def initialize(query)
     @query = query
   end
@@ -30,7 +33,7 @@ class AiAnalysisService
   end
 
   def build_messages
-    prompt_type = @query.project.prompt_type
+    prompt_type = T.must(@query.project).prompt_type
 
     case prompt_type
     when "is-it-spam"
