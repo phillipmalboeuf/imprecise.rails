@@ -21,12 +21,12 @@ default: &default
   # Use DATABASE_URL if provided, otherwise use credentials or defaults
   <% if ENV["DATABASE_URL"] %>
   url: <%= ENV["DATABASE_URL"] %>
-  <% else %>
-  username: <%= Rails.application.credentials.planetscale&.fetch(:username) %>
-  password: <%= Rails.application.credentials.planetscale&.fetch(:password) %>
-  database: <%= Rails.application.credentials.planetscale&.fetch(:database) %>
-  host: <%= Rails.application.credentials.planetscale&.fetch(:host) %>
-  port: <%= Rails.application.credentials.planetscale&.fetch(:port) %>
+  <% elsif Rails.application.credentials&.planetscale %>
+  username: <%= Rails.application.credentials.planetscale.fetch(:username) %>
+  password: <%= Rails.application.credentials.planetscale.fetch(:password) %>
+  database: <%= Rails.application.credentials.planetscale.fetch(:database) %>
+  host: <%= Rails.application.credentials.planetscale.fetch(:host) %>
+  port: <%= Rails.application.credentials.planetscale.fetch(:port) %>
   <% end %>
 
 
