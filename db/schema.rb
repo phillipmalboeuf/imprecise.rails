@@ -12,8 +12,7 @@
 
 ActiveRecord::Schema[8.1].define(version: 2025_12_29_000000) do
   # These are extensions that must be enabled in order to support this database
-  enable_extension "pg_catalog.plpgsql"
-  enable_extension "pscale_extensions.hypopg"
+  enable_extension "plpgsql"
 
   create_table "projects", force: :cascade do |t|
     t.datetime "created_at", null: false

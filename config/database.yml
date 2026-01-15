@@ -18,11 +18,16 @@ default: &default
   # For details on connection pooling, see Rails configuration guide
   # https://guides.rubyonrails.org/configuring.html#database-pooling
   max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  # Use DATABASE_URL if provided, otherwise use credentials or defaults
+  <% if ENV["DATABASE_URL"] %>
+  url: <%= ENV["DATABASE_URL"] %>
+  <% else %>
   username: <%= Rails.application.credentials.planetscale&.fetch(:username) %>
   password: <%= Rails.application.credentials.planetscale&.fetch(:password) %>
   database: <%= Rails.application.credentials.planetscale&.fetch(:database) %>
   host: <%= Rails.application.credentials.planetscale&.fetch(:host) %>
   port: <%= Rails.application.credentials.planetscale&.fetch(:port) %>
+  <% end %>
 
 
 development:
@@ -89,6 +94,32 @@ test:
 # for a full overview on how database connection configuration can be specified.
 #
 production:
+  # Use DATABASE_URL if provided (from Dokku/RDS)
+  <% if ENV["DATABASE_URL"] %>
+  primary:
+    url: <%= ENV["DATABASE_URL"] %>
+  cache:
+    <% if ENV["CACHE_DATABASE_URL"] %>
+    url: <%= ENV["CACHE_DATABASE_URL"] %>
+    <% else %>
+    url: <%= ENV["DATABASE_URL"].sub(%r{/([^/]+)$}, '/\1_cache') %>
+    <% end %>
+    migrations_paths: db/cache_migrate
+  queue:
+    <% if ENV["QUEUE_DATABASE_URL"] %>
+    url: <%= ENV["QUEUE_DATABASE_URL"] %>
+    <% else %>
+    url: <%= ENV["DATABASE_URL"].sub(%r{/([^/]+)$}, '/\1_queue') %>
+    <% end %>
+    migrations_paths: db/queue_migrate
+  cable:
+    <% if ENV["CABLE_DATABASE_URL"] %>
+    url: <%= ENV["CABLE_DATABASE_URL"] %>
+    <% else %>
+    url: <%= ENV["DATABASE_URL"].sub(%r{/([^/]+)$}, '/\1_cable') %>
+    <% end %>
+    migrations_paths: db/cable_migrate
+  <% else %>
   primary: &primary_production
     <<: *default
     database: <%= ENV.fetch("DB_DATABASE", "imprecise_analysis_production") %>
@@ -108,3 +139,4 @@ production:
     <<: *primary_production
     database: <%= ENV.fetch("DB_DATABASE", "imprecise_analysis_production") %>_cable
     migrations_paths: db/cable_migrate
+  <% end %>
