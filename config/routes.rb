@@ -8,7 +8,11 @@ Rails.application.routes.draw do
   resource :session
   resources :passwords, param: :token
   resources :users, only: %i[ new create ]
-  resources :projects, param: :slug
+  resources :projects, param: :slug do
+    member do
+      patch :regenerate_apikey
+    end
+  end
   resources :queries, only: [:create]
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 

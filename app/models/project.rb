@@ -27,6 +27,15 @@ class Project < ApplicationRecord
     @_raw_apikey
   end
 
+  def regenerate_apikey!
+    apikey = SecureRandom.uuid
+    # Store raw API key in memory temporarily so it can be displayed to the user
+    @_raw_apikey = apikey
+    # Hash the API key (one-way, cannot be decrypted)
+    self.encrypted_apikey = Digest::SHA256.hexdigest(apikey)
+    save!
+  end
+
   def reload(*)
     @_raw_apikey = nil
     super

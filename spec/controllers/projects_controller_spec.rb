@@ -64,4 +64,55 @@ RSpec.describe ProjectsController, type: :controller do
       end
     end
   end
+
+  describe 'PATCH #regenerate_apikey' do
+    let(:project) do
+      Project.create!(
+        name: "Test Project",
+        slug: "test-project-#{Time.current.to_i}",
+        status: "draft",
+        prompt_type: "is-it-spam",
+        owner: user
+      )
+    end
+
+    it 'regenerates a new API key' do
+      old_apikey_hash = project.encrypted_apikey
+
+      patch :regenerate_apikey, params: { slug: project.slug }
+
+      project.reload
+      expect(project.encrypted_apikey).not_to eq(old_apikey_hash)
+      expect(project.encrypted_apikey).to be_present
+    end
+
+    it 'displays the new API key in the flash message' do
+      patch :regenerate_apikey, params: { slug: project.slug }
+
+      expect(flash[:notice]).to include("API Key regenerated successfully!")
+      expect(flash[:notice]).to include("New API Key:")
+      expect(flash[:notice]).to match(/New API Key: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+    end
+
+    it 'redirects to projects index' do
+      patch :regenerate_apikey, params: { slug: project.slug }
+
+      expect(response).to redirect_to(projects_path)
+    end
+
+    it 'prevents regenerating API key for projects owned by other users' do
+      other_user = User.create!(email_address: "other@example.com", password: "password123")
+      other_project = Project.create!(
+        name: "Other Project",
+        slug: "other-project-#{Time.current.to_i}",
+        status: "draft",
+        prompt_type: "is-it-spam",
+        owner: other_user
+      )
+
+      expect {
+        patch :regenerate_apikey, params: { slug: other_project.slug }
+      }.to raise_error(ActiveRecord::RecordNotFound)
+    end
+  end
 end

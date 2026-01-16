@@ -24,7 +24,11 @@
           <td><%= project.status %></td>
           <td><%= project.prompt_type %></td>
           <td><%= project.owner&.email_address %></td>
-          <td><%= link_to "Test", project_path(project), class: "btn btn-soft" %> <%= link_to "Edit", edit_project_path(project), class: "btn btn-soft" %></td>
+          <td class="flex gap-1">
+            <%= link_to "Test", project_path(project), class: "btn btn-soft" %>
+            <%= link_to "Edit", edit_project_path(project), class: "btn btn-soft" %>
+            <%= button_to "Regenerate API Key", regenerate_apikey_project_path(project), method: :patch, class: "btn btn-soft", data: { confirm: "Are you sure you want to regenerate the API key? The old key will no longer work." } %>
+          </td>
         </tr>
       <% end %>
     <% else %>

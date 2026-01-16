@@ -134,4 +134,72 @@ RSpec.describe Project, type: :model do
       expect(project.reload.encrypted_apikey).to eq(original_apikey)
     end
   end
+
+  describe 'regenerate_apikey!' do
+    let(:project) do
+      Project.create!(
+        name: "Test Project",
+        slug: "test-project-#{Time.current.to_i}",
+        status: "draft",
+        prompt_type: "is-it-spam",
+        owner: user
+      )
+    end
+
+    it 'generates a new API key' do
+      original_apikey_hash = project.encrypted_apikey
+
+      project.regenerate_apikey!
+
+      expect(project.encrypted_apikey).not_to eq(original_apikey_hash)
+      expect(project.encrypted_apikey).to be_present
+    end
+
+    it 'stores the new API key as a SHA256 hash' do
+      project.regenerate_apikey!
+
+      expect(project.encrypted_apikey).to match(/\A[0-9a-f]{64}\z/i)
+    end
+
+    it 'makes the new API key available via decrypted_apikey before reload' do
+      project.regenerate_apikey!
+
+      decrypted_apikey = project.decrypted_apikey
+      expect(decrypted_apikey).to match(/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i)
+    end
+
+    it 'loses the raw API key after reload' do
+      project.regenerate_apikey!
+      project.reload
+
+      expect(project.decrypted_apikey).to be_nil
+    end
+
+    it 'ensures the new API key hash is unique' do
+      project1 = Project.create!(
+        name: "Test Project 1",
+        slug: "test-project-1-#{Time.current.to_i}",
+        status: "draft",
+        prompt_type: "is-it-spam",
+        owner: user
+      )
+      project2 = Project.create!(
+        name: "Test Project 2",
+        slug: "test-project-2-#{Time.current.to_i}",
+        status: "draft",
+        prompt_type: "is-it-spam",
+        owner: user
+      )
+
+      original_hash1 = project1.encrypted_apikey
+      original_hash2 = project2.encrypted_apikey
+
+      project1.regenerate_apikey!
+      project2.regenerate_apikey!
+
+      expect(project1.encrypted_apikey).not_to eq(original_hash1)
+      expect(project2.encrypted_apikey).not_to eq(original_hash2)
+      expect(project1.encrypted_apikey).not_to eq(project2.encrypted_apikey)
+    end
+  end
 end

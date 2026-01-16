@@ -36,6 +36,13 @@ class ProjectsController < ApplicationController
     end
   end
 
+  def regenerate_apikey
+    @project = Current.user.projects.find_by!(slug: params[:slug])
+
+    @project.regenerate_apikey!
+    redirect_to projects_path, notice: "API Key regenerated successfully! New API Key: #{@project.decrypted_apikey}"
+  end
+
   private
 
     def project_params
