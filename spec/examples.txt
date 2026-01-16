@@ -1,11 +1,25 @@
 example_id                                              | status | run_time        |
 ------------------------------------------------------- | ------ | --------------- |
-./spec/controllers/queries_controller_spec.rb[1:1:1:1]  | passed | 5.16 seconds    |
-./spec/controllers/queries_controller_spec.rb[1:1:2:1]  | passed | 0.24878 seconds |
-./spec/controllers/queries_controller_spec.rb[1:1:3:1]  | passed | 0.23279 seconds |
-./spec/integration/ai_analysis_integration_spec.rb[1:1] | passed | 20.98 seconds   |
-./spec/models/user_spec.rb[1:1:1]                       | passed | 0.04769 seconds |
-./spec/services/ai_analysis_service_spec.rb[1:1:1:1]    | passed | 3.81 seconds    |
-./spec/services/ai_analysis_service_spec.rb[1:1:2:1]    | passed | 5.73 seconds    |
-./spec/services/ai_analysis_service_spec.rb[1:1:3:1]    | passed | 6.7 seconds     |
-./spec/services/ai_analysis_service_spec.rb[1:1:4:1]    | passed | 6.33 seconds    |
+./spec/controllers/projects_controller_spec.rb[1:1:1:1] | passed | 0.39773 seconds |
+./spec/controllers/projects_controller_spec.rb[1:1:1:2] | passed | 0.26167 seconds |
+./spec/controllers/projects_controller_spec.rb[1:1:1:3] | passed | 0.23067 seconds |
+./spec/controllers/projects_controller_spec.rb[1:1:1:4] | passed | 0.23008 seconds |
+./spec/controllers/projects_controller_spec.rb[1:1:2:1] | passed | 0.27997 seconds |
+./spec/controllers/projects_controller_spec.rb[1:1:2:2] | passed | 0.25434 seconds |
+./spec/controllers/queries_controller_spec.rb[1:1:1:1]  | passed | 5.08 seconds    |
+./spec/controllers/queries_controller_spec.rb[1:1:2:1]  | passed | 0.77847 seconds |
+./spec/controllers/queries_controller_spec.rb[1:1:3:1]  | passed | 0.26895 seconds |
+./spec/integration/ai_analysis_integration_spec.rb[1:1] | passed | 23.33 seconds   |
+./spec/models/project_spec.rb[1:1:1]                    | passed | 0.21153 seconds |
+./spec/models/project_spec.rb[1:1:2]                    | passed | 0.1706 seconds  |
+./spec/models/project_spec.rb[1:1:3]                    | passed | 0.14907 seconds |
+./spec/models/project_spec.rb[1:1:4]                    | passed | 0.17321 seconds |
+./spec/models/project_spec.rb[1:1:5]                    | passed | 0.2184 seconds  |
+./spec/models/project_spec.rb[1:1:6]                    | passed | 0.23769 seconds |
+./spec/models/project_spec.rb[1:1:7]                    | passed | 0.06097 seconds |
+./spec/models/project_spec.rb[1:1:8]                    | passed | 0.20925 seconds |
+./spec/models/user_spec.rb[1:1:1]                       | passed | 0.04351 seconds |
+./spec/services/ai_analysis_service_spec.rb[1:1:1:1]    | passed | 3.77 seconds    |
+./spec/services/ai_analysis_service_spec.rb[1:1:2:1]    | passed | 4.07 seconds    |
+./spec/services/ai_analysis_service_spec.rb[1:1:3:1]    | passed | 8.06 seconds    |
+./spec/services/ai_analysis_service_spec.rb[1:1:4:1]    | passed | 5.88 seconds    |

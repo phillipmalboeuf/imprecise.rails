@@ -10,18 +10,21 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2025_12_29_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_16_000000) do
   # These are extensions that must be enabled in order to support this database
-  enable_extension "plpgsql"
+  enable_extension "pg_catalog.plpgsql"
+  enable_extension "pscale_extensions.hypopg"
 
   create_table "projects", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.text "encrypted_apikey"
     t.string "name", null: false
     t.string "prompt_type", null: false
     t.string "slug", null: false
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id"
+    t.index ["encrypted_apikey"], name: "index_projects_on_encrypted_apikey", unique: true
     t.index ["slug"], name: "index_projects_on_slug", unique: true
     t.index ["user_id"], name: "index_projects_on_user_id"
   end

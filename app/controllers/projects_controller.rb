@@ -16,7 +16,7 @@ class ProjectsController < ApplicationController
     @project = Current.user.projects.build(project_params)
 
     if @project.save
-      redirect_to projects_path, notice: "Project created successfully!"
+      redirect_to projects_path, notice: "Project created successfully! API Key: #{@project.decrypted_apikey}"
     else
       render :new, status: :unprocessable_entity
     end
