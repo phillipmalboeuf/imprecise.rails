@@ -21,9 +21,9 @@ class QueriesController < ApplicationController
       ai_response = AiAnalysisService.new(@query).call
       @query.update(response: { content: ai_response }) if ai_response.present?
 
-      redirect_to project_path(@query.project_id), notice: "Query created successfully!"
+      redirect_to project_path(@query.project), notice: "Query created successfully!"
     else
-      redirect_to project_path(@query.project_id), alert: "Error: #{@query.errors.full_messages.join(', ')}"
+      redirect_to project_path(@query.project), alert: "Error: #{@query.errors.full_messages.join(', ')}"
     end
   end
 

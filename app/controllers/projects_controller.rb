@@ -4,8 +4,8 @@ class ProjectsController < ApplicationController
   end
 
   def show
-    @project = Current.user.projects.find(params[:id])
-    @queries = @project.queries.order(created_at: :desc)
+    @project = Current.user.projects.find_by!(slug: params[:slug])
+    @queries = @project.queries.order(created_at: :desc).limit(10)
   end
 
   def new
@@ -23,11 +23,11 @@ class ProjectsController < ApplicationController
   end
 
   def edit
-    @project = Current.user.projects.find(params[:id])
+    @project = Current.user.projects.find_by!(slug: params[:slug])
   end
 
   def update
-    @project = Current.user.projects.find(params[:id])
+    @project = Current.user.projects.find_by!(slug: params[:slug])
 
     if @project.update(project_params)
       redirect_to @project, notice: "Project updated successfully!"

@@ -8,7 +8,7 @@ Rails.application.routes.draw do
   resource :session
   resources :passwords, param: :token
   resources :users, only: %i[ new create ]
-  resources :projects
+  resources :projects, param: :slug
   resources :queries, only: [:create]
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
