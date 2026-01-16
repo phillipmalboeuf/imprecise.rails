@@ -8,16 +8,22 @@
 
 <div class="mb-6">
   <h2 class="text-xl font-semibold mb-3">Create Query</h2>
-  <%= form_with class: "form space-y-4", url: queries_path, method: :post, local: true do |form| %>
-    <%= form.hidden_field :project_id, value: @project.id %>
-    
-    <div>
-      <%= form.label :query, "Query", class: "label" %>
-      <%= form.text_area :query, required: true, class: "textarea textarea-bordered w-full", rows: 4, placeholder: "Enter your query..." %>
-    </div>
-    
-    <div>
-      <%= form.submit "Create Query", class: "btn btn-primary" %>
+  <% if @project.published? %>
+    <%= form_with class: "form space-y-4", url: queries_path, method: :post, local: true do |form| %>
+      <%= form.hidden_field :project_id, value: @project.id %>
+      
+      <div>
+        <%= form.label :query, "Query", class: "label" %>
+        <%= form.text_area :query, required: true, class: "textarea textarea-bordered w-full", rows: 4, placeholder: "Enter your query..." %>
+      </div>
+      
+      <div>
+        <%= form.submit "Create Query", class: "btn btn-primary" %>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="alert alert-warning">
+      <p>This project must be published before you can create queries. Please edit the project and change its status to "Published".</p>
     </div>
   <% end %>
 </div>

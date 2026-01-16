@@ -3,6 +3,18 @@
 
 class QueriesController < ApplicationController
   def create
+    project = Current.user.projects.find_by(id: params[:project_id])
+    
+    unless project
+      redirect_to projects_path, alert: "Project not found."
+      return
+    end
+    
+    unless project.published?
+      redirect_to project_path(project), alert: "Project must be published to create queries."
+      return
+    end
+
     @query = Query.new(query_params)
 
     if @query.save
