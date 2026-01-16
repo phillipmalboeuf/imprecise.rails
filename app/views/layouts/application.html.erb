@@ -26,6 +26,7 @@
   <body>
     <nav class="navbar">
       <ul class="menu menu-horizontal flex items-center justify-center">
+        <li><%= link_to "Imprecise Analysis", root_path, class: "btn btn-sm btn-ghost" %></li>
         <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
         <li><%= button_to "Log out", session_path, method: :delete, class: "btn btn-sm btn-soft" if authenticated? %></li>
       </ul>
@@ -47,8 +48,12 @@
       
       <%= yield %>
 
-      <div id="react-root">
-      </div>
+      <%
+=begin%>
+ <div id="react-root">
+      </div> 
+<%
+=end%>
     </main>
   </body>
 </html>

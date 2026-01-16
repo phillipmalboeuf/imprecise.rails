@@ -3,7 +3,7 @@
 <%= tag.div(flash[:alert], style: "color:red") if flash[:alert] %>
 <%= tag.div(flash[:notice], style: "color:green") if flash[:notice] %>
 
-<%= form_with model: @project, url: projects_path do |form| %>
+<%= form_with class: "form space-y-2", model: @project, url: projects_path do |form| %>
   <% if @project.errors.any? %>
     <div style="color:red">
       <h2><%= pluralize(@project.errors.count, "error") %> prohibited this project from being saved:</h2>

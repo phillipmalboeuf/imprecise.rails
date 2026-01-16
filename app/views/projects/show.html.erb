@@ -6,7 +6,7 @@
 
 <div class="mb-6">
   <h2 class="text-xl font-semibold mb-3">Create Query</h2>
-  <%= form_with url: queries_path, method: :post, local: true, class: "space-y-4" do |form| %>
+  <%= form_with class: "form space-y-4", url: queries_path, method: :post, local: true do |form| %>
     <%= form.hidden_field :project_id, value: @project.id %>
     
     <div>
