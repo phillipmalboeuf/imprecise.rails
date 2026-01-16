@@ -25,9 +25,10 @@
 
   <body>
     <nav class="navbar">
-      <ul class="menu menu-horizontal flex items-center justify-center">
+      <ul class="menu menu-horizontal flex items-center justify-center gap-1">
         <li><%= link_to "Imprecise Analysis", root_path, class: "btn btn-sm btn-ghost" %></li>
         <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
+        <li><%= link_to "Daily Usage", daily_usages_path, class: "btn btn-sm btn-ghost" if authenticated? %></li>
         <li><%= button_to "Log out", session_path, method: :delete, class: "btn btn-sm btn-soft" if authenticated? %></li>
       </ul>
     </nav>

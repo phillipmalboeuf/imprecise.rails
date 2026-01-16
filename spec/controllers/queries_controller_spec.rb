@@ -31,6 +31,135 @@ RSpec.describe QueriesController, type: :controller do
         expect(flash[:notice]).to eq("Query created successfully!")
         expect(Query.count).to eq(1)
       end
+
+      context 'with AI response containing usage information' do
+        let(:mock_usage) do
+          double('Usage', prompt_tokens: 150, completion_tokens: 50, total_tokens: 200)
+        end
+
+        let(:mock_ai_response) do
+          double('ChatCompletion',
+            usage: mock_usage,
+            choices: [double('Choice', message: double('Message', content: 'Test response'))]
+          )
+        end
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(mock_ai_response)
+        end
+
+        it 'creates a daily usage record when a query is made' do
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.to change { DailyUsage.count }.by(1)
+
+          daily_usage = DailyUsage.find_by(day: Date.current, user: user, project: project)
+          expect(daily_usage).to be_present
+          expect(daily_usage.token_used).to eq(150)
+        end
+
+        it 'increments token_used for existing daily usage record' do
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 100,
+            user: user,
+            project: project
+          )
+
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.not_to change { DailyUsage.count }
+
+          daily_usage = DailyUsage.find_by(day: Date.current, user: user, project: project)
+          expect(daily_usage.token_used).to eq(250)
+        end
+
+        it 'tracks tokens correctly for multiple queries on the same day' do
+          post :create, params: {
+            query: "Test query 1",
+            project_id: project.id
+          }
+
+          post :create, params: {
+            query: "Test query 2",
+            project_id: project.id
+          }
+
+          daily_usage = DailyUsage.find_by(day: Date.current, user: user, project: project)
+          expect(daily_usage.token_used).to eq(300) # 150 + 150
+        end
+      end
+
+      context 'with AI response without usage information' do
+        let(:mock_ai_response) do
+          double('ChatCompletion',
+            usage: nil,
+            choices: [double('Choice', message: double('Message', content: 'Test response'))]
+          )
+        end
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(mock_ai_response)
+        end
+
+        it 'does not create a daily usage record when usage is nil' do
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.not_to change { DailyUsage.count }
+        end
+      end
+
+      context 'with AI response error' do
+        let(:error_response) { { error: "API Error" } }
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(error_response)
+        end
+
+        it 'does not create a daily usage record when AI response is an error' do
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.not_to change { DailyUsage.count }
+        end
+      end
+
+      context 'with zero prompt tokens' do
+        let(:mock_usage) do
+          double('Usage', prompt_tokens: 0, completion_tokens: 50, total_tokens: 50)
+        end
+
+        let(:mock_ai_response) do
+          double('ChatCompletion',
+            usage: mock_usage,
+            choices: [double('Choice', message: double('Message', content: 'Test response'))]
+          )
+        end
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(mock_ai_response)
+        end
+
+        it 'does not create a daily usage record when prompt_tokens is 0' do
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.not_to change { DailyUsage.count }
+        end
+      end
     end
 
     context 'when project is draft' do
@@ -118,6 +247,38 @@ RSpec.describe QueriesController, type: :controller do
         created_query = Query.last
         expect(created_query.project_id).to eq(project.id)
         expect(created_query.query).to eq("Test query via API key")
+      end
+
+      context 'with AI response containing usage information' do
+        let(:mock_usage) do
+          double('Usage', prompt_tokens: 200, completion_tokens: 75, total_tokens: 275)
+        end
+
+        let(:mock_ai_response) do
+          double('ChatCompletion',
+            usage: mock_usage,
+            choices: [double('Choice', message: double('Message', content: 'Test response'))]
+          )
+        end
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(mock_ai_response)
+        end
+
+        it 'tracks daily usage when authenticated via API key' do
+          request.env['HTTP_AUTHORIZATION'] = "Bearer #{api_key}"
+          
+          expect {
+            post :create, params: {
+              query: "Test query via API key",
+              project_id: project.id
+            }
+          }.to change { DailyUsage.count }.by(1)
+
+          daily_usage = DailyUsage.find_by(day: Date.current, user: user, project: project)
+          expect(daily_usage).to be_present
+          expect(daily_usage.token_used).to eq(200)
+        end
       end
 
       it 'rejects invalid API key' do

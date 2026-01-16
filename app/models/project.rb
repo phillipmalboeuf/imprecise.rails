@@ -4,6 +4,7 @@
 class Project < ApplicationRecord
   belongs_to :owner, class_name: "User", foreign_key: "user_id"
   has_many :queries, dependent: :destroy
+  has_many :daily_usages, dependent: :nullify
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true

@@ -37,6 +37,22 @@ class QueriesController < ApplicationController
       ai_response = AiAnalysisService.new(@query).call
       @query.update(response: { content: ai_response }) if ai_response.present?
 
+      # Track daily usage if we have a valid AI response with usage information
+      if ai_response.present? && !ai_response.is_a?(Hash) && ai_response.respond_to?(:usage)
+        usage = ai_response.usage
+        if usage && usage.respond_to?(:prompt_tokens)
+          prompt_tokens = usage.prompt_tokens || 0
+          if prompt_tokens > 0
+            DailyUsage.increment_tokens!(
+              day: Date.current,
+              user: project.owner,
+              project: project,
+              tokens: prompt_tokens
+            )
+          end
+        end
+      end
+
       # If authenticated via API key, return JSON response
       if authenticated_via_api_key
         render json: { 
