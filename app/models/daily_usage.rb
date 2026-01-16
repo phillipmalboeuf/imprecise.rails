@@ -18,4 +18,16 @@ class DailyUsage < ApplicationRecord
     daily_usage.save!
     daily_usage
   end
+
+  # Get the total token usage for a user and project in the current month
+  def self.monthly_total(user:, project:)
+    start_date = Date.current.beginning_of_month
+    end_date = Date.current.end_of_month
+    
+    where(
+      user: user,
+      project: project,
+      day: start_date..end_date
+    ).sum(:token_used)
+  end
 end

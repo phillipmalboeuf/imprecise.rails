@@ -4,6 +4,8 @@
 class QueriesController < ApplicationController
   allow_unauthenticated_access only: [:create]
 
+  MAX_MONTHLY_TOKENS = 10_000
+
   def create
     api_key = extract_api_key
     authenticated_via_api_key = false
@@ -31,7 +33,27 @@ class QueriesController < ApplicationController
       end
     end
 
+    # Check monthly token limit before creating the query
     @query = Query.new(query_params)
+    @query.project = project
+    
+    # Estimate tokens for this query
+    estimated_tokens = AiAnalysisService.new(@query).estimate_prompt_tokens
+    
+    # Get current monthly usage
+    current_monthly_usage = DailyUsage.monthly_total(user: project.owner, project: project)
+    
+    # Check if adding this query would exceed the monthly limit (10,000 tokens)
+    if current_monthly_usage + estimated_tokens > MAX_MONTHLY_TOKENS
+      error_message = "Monthly token limit exceeded. Current usage: #{current_monthly_usage}, Estimated for this query: #{estimated_tokens}, Limit: #{MAX_MONTHLY_TOKENS}."
+      if authenticated_via_api_key
+        render json: { error: error_message }, status: :forbidden
+        return
+      else
+        redirect_to project_path(project), alert: error_message
+        return
+      end
+    end
 
     if @query.save
       ai_response = AiAnalysisService.new(@query).call

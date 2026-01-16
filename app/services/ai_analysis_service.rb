@@ -26,6 +26,21 @@ class AiAnalysisService
     { error: e.message }
   end
 
+  # Estimate the number of tokens that will be used for the prompt
+  # Uses a simple approximation: ~4 characters per token (common for English text)
+  # This is a rough estimate and may not be exact, but should be close enough for quota checking
+  def estimate_prompt_tokens
+    messages = build_messages
+    total_chars = messages.sum do |message|
+      # Count characters in the content
+      content = message[:content] || ""
+      content.length
+    end
+    
+    # Divide by 4 to get approximate token count (4 chars per token is a common approximation)
+    (total_chars / 4.0).ceil
+  end
+
   private
 
   def api_key

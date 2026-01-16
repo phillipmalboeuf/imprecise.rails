@@ -160,6 +160,131 @@ RSpec.describe QueriesController, type: :controller do
           }.not_to change { DailyUsage.count }
         end
       end
+
+      context 'monthly token limit' do
+        let(:mock_usage) do
+          double('Usage', prompt_tokens: 100, completion_tokens: 50, total_tokens: 150)
+        end
+
+        let(:mock_ai_response) do
+          double('ChatCompletion',
+            usage: mock_usage,
+            choices: [double('Choice', message: double('Message', content: 'Test response'))]
+          )
+        end
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(mock_ai_response)
+        end
+
+        it 'allows query creation when under the monthly limit' do
+          # Set current monthly usage to 5000 tokens
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 5000,
+            user: user,
+            project: project
+          )
+
+          # Mock estimate to return 100 tokens
+          allow_any_instance_of(AiAnalysisService).to receive(:estimate_prompt_tokens).and_return(100)
+
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.to change { Query.count }.by(1)
+
+          expect(response).to redirect_to(project_path(project))
+          expect(flash[:notice]).to eq("Query created successfully!")
+        end
+
+        it 'prevents query creation when monthly limit would be exceeded' do
+          # Set current monthly usage to 9950 tokens
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 9950,
+            user: user,
+            project: project
+          )
+
+          # Mock estimate to return 100 tokens (total would be 10050, exceeding the limit)
+          allow_any_instance_of(AiAnalysisService).to receive(:estimate_prompt_tokens).and_return(100)
+
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.not_to change { Query.count }
+
+          expect(response).to redirect_to(project_path(project))
+          expect(flash[:alert]).to include("Monthly token limit exceeded")
+          expect(flash[:alert]).to include("Current usage: 9950")
+          expect(flash[:alert]).to include("Estimated for this query: 100")
+          expect(flash[:alert]).to include("Limit: 10000")
+        end
+
+        it 'calculates monthly usage across multiple days' do
+          # Create usage records for multiple days in the current month
+          DailyUsage.create!(
+            day: Date.current.beginning_of_month,
+            token_used: 3000,
+            user: user,
+            project: project
+          )
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 2000,
+            user: user,
+            project: project
+          )
+
+          # Mock estimate to return 5000 tokens (total would be 10000, exactly at limit)
+          allow_any_instance_of(AiAnalysisService).to receive(:estimate_prompt_tokens).and_return(5000)
+
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.to change { Query.count }.by(1)
+
+          expect(response).to redirect_to(project_path(project))
+        end
+
+        it 'only counts usage from the current month' do
+          # Create usage from previous month (should not count)
+          last_month = Date.current.beginning_of_month - 1.day
+          DailyUsage.create!(
+            day: last_month,
+            token_used: 50000,
+            user: user,
+            project: project
+          )
+
+          # Create usage from current month
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 9900,
+            user: user,
+            project: project
+          )
+
+          # Mock estimate to return 100 tokens (should be allowed since previous month doesn't count)
+          allow_any_instance_of(AiAnalysisService).to receive(:estimate_prompt_tokens).and_return(100)
+
+          expect {
+            post :create, params: {
+              query: "Test query",
+              project_id: project.id
+            }
+          }.to change { Query.count }.by(1)
+
+          expect(response).to redirect_to(project_path(project))
+        end
+      end
     end
 
     context 'when project is draft' do
@@ -278,6 +403,79 @@ RSpec.describe QueriesController, type: :controller do
           daily_usage = DailyUsage.find_by(day: Date.current, user: user, project: project)
           expect(daily_usage).to be_present
           expect(daily_usage.token_used).to eq(200)
+        end
+      end
+
+      context 'monthly token limit with API key authentication' do
+        let(:mock_usage) do
+          double('Usage', prompt_tokens: 100, completion_tokens: 50, total_tokens: 150)
+        end
+
+        let(:mock_ai_response) do
+          double('ChatCompletion',
+            usage: mock_usage,
+            choices: [double('Choice', message: double('Message', content: 'Test response'))]
+          )
+        end
+
+        before do
+          allow_any_instance_of(AiAnalysisService).to receive(:call).and_return(mock_ai_response)
+        end
+
+        it 'prevents query creation when monthly limit would be exceeded via API key' do
+          # Set current monthly usage to 9950 tokens
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 9950,
+            user: user,
+            project: project
+          )
+
+          # Mock estimate to return 100 tokens (total would be 10050, exceeding the limit)
+          allow_any_instance_of(AiAnalysisService).to receive(:estimate_prompt_tokens).and_return(100)
+
+          request.env['HTTP_AUTHORIZATION'] = "Bearer #{api_key}"
+
+          expect {
+            post :create, params: {
+              query: "Test query via API key",
+              project_id: project.id
+            }
+          }.not_to change { Query.count }
+
+          expect(response.status).to eq(403)
+          expect(response.content_type).to include("application/json")
+          
+          json_response = JSON.parse(response.body)
+          expect(json_response["error"]).to include("Monthly token limit exceeded")
+          expect(json_response["error"]).to include("Current usage: 9950")
+          expect(json_response["error"]).to include("Estimated for this query: 100")
+          expect(json_response["error"]).to include("Limit: 10000")
+        end
+
+        it 'allows query creation when under the monthly limit via API key' do
+          # Set current monthly usage to 5000 tokens
+          DailyUsage.create!(
+            day: Date.current,
+            token_used: 5000,
+            user: user,
+            project: project
+          )
+
+          # Mock estimate to return 100 tokens
+          allow_any_instance_of(AiAnalysisService).to receive(:estimate_prompt_tokens).and_return(100)
+
+          request.env['HTTP_AUTHORIZATION'] = "Bearer #{api_key}"
+
+          expect {
+            post :create, params: {
+              query: "Test query via API key",
+              project_id: project.id
+            }
+          }.to change { Query.count }.by(1)
+
+          expect(response.status).to eq(201)
+          expect(response.content_type).to include("application/json")
         end
       end
 
