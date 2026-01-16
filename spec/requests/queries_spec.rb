@@ -24,9 +24,9 @@ RSpec.describe "Queries API", type: :request do
             project_id: project.id
           },
           headers: {
-            "Authorization" => "Bearer #{api_key}",
-            "Content-Type" => "application/json"
-          }
+            "Authorization" => "Bearer #{api_key}"
+          },
+          as: :json
 
         expect(response).to have_http_status(:created)
         expect(response.content_type).to include("application/json")
@@ -49,9 +49,9 @@ RSpec.describe "Queries API", type: :request do
             project_id: project.id
           },
           headers: {
-            "Authorization" => "ApiKey #{api_key}",
-            "Content-Type" => "application/json"
-          }
+            "Authorization" => "ApiKey #{api_key}"
+          },
+          as: :json
 
         expect(response).to have_http_status(:created)
         expect(Query.count).to eq(1)
@@ -65,9 +65,9 @@ RSpec.describe "Queries API", type: :request do
             project_id: project.id
           },
           headers: {
-            "Authorization" => "Bearer invalid-api-key-12345",
-            "Content-Type" => "application/json"
-          }
+            "Authorization" => "Bearer invalid-api-key-12345"
+          },
+          as: :json
 
         expect(response).to have_http_status(:unauthorized)
         expect(response.content_type).to include("application/json")
@@ -83,9 +83,7 @@ RSpec.describe "Queries API", type: :request do
             query: "Test query",
             project_id: project.id
           },
-          headers: {
-            "Content-Type" => "application/json"
-          }
+          as: :json
 
         expect(response).to have_http_status(:unauthorized)
         expect(Query.count).to eq(0)
@@ -107,9 +105,9 @@ RSpec.describe "Queries API", type: :request do
             project_id: draft_project.id
           },
           headers: {
-            "Authorization" => "Bearer #{draft_api_key}",
-            "Content-Type" => "application/json"
-          }
+            "Authorization" => "Bearer #{draft_api_key}"
+          },
+          as: :json
 
         expect(response).to have_http_status(:forbidden)
         expect(response.content_type).to include("application/json")
