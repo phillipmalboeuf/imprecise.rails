@@ -11,8 +11,7 @@
       <th>Status</th>
       <th>Prompt Type</th>
       <th>Owner</th>
-      <th>Created At</th>
-      <th>Updated At</th>
+      <th>Status</th>
       <th>Actions</th>
     </tr>
   </thead>
@@ -26,8 +25,7 @@
           <td><%= project.status %></td>
           <td><%= project.prompt_type %></td>
           <td><%= project.owner&.email_address %></td>
-          <td><%= project.created_at %></td>
-          <td><%= project.updated_at %></td>
+          <td><%= project.status %></td>
           <td><%= link_to "Test", project_path(project), class: "btn btn-soft" %> <%= link_to "Edit", edit_project_path(project), class: "btn btn-soft" %></td>
         </tr>
       <% end %>

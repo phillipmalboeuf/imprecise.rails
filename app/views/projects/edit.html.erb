@@ -1,9 +1,9 @@
-<h1 class="text-2xl font-bold mb-4">New Project</h1>
+<h1 class="text-2xl font-bold mb-4">Edit Project</h1>
 
 <%= tag.div(flash[:alert], style: "color:red") if flash[:alert] %>
 <%= tag.div(flash[:notice], style: "color:green") if flash[:notice] %>
 
-<%= form_with class: "form space-y-2", model: @project, url: projects_path do |form| %>
+<%= form_with class: "form space-y-2", model: @project, url: project_path(@project) do |form| %>
   <% if @project.errors.any? %>
     <div style="color:red">
       <h2><%= pluralize(@project.errors.count, "error") %> prohibited this project from being saved:</h2>
@@ -27,10 +27,10 @@
   <%= form.label :prompt_type, "Prompt Type", class: "label" %><br>
   <%= form.select :prompt_type, options_for_select([["Is it Spam", "is-it-spam"], ["Is it AI", "is-it-ai"], ["Topics", "topics"], ["Sentiment", "sentiment"]], @project.prompt_type), { prompt: "Select prompt type" }, { required: true, class: "input" } %><br>
 
-  <%= form.submit "Create Project", class: "btn btn-primary" %>
+  <%= form.submit "Update Project", class: "btn btn-primary" %>
 <% end %>
 
 <br>
 
-<%= link_to "Back to projects", projects_path %>
-
+<%= link_to "Back to project", @project, class: "btn btn-soft" %>
+<%= link_to "Back to projects", projects_path, class: "btn btn-soft" %>

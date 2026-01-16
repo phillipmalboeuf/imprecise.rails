@@ -1,7 +1,9 @@
 <h1 class="text-2xl font-bold mb-4"><%= @project.name %></h1>
 
 <div class="mb-4">
+  <%= link_to "Edit Project", edit_project_path(@project), class: "btn btn-soft mb-2" %>
   <p><strong>Prompt Type:</strong> <%= @project.prompt_type %></p>
+  <p><strong>Status:</strong> <%= @project.status %></p>
 </div>
 
 <div class="mb-6">
@@ -57,4 +59,5 @@
   </div>
 <% end %>
 
+<%= link_to "Edit Project", edit_project_path(@project), class: "btn btn-soft" %>
 <%= link_to "Back to Projects", projects_path, class: "btn btn-soft" %>
