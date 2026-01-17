@@ -25,11 +25,19 @@
 
   <body>
     <nav class="navbar">
-      <ul class="menu menu-horizontal flex items-center justify-center gap-1">
+      <ul class="menu menu-horizontal w-full flex items-center gap-1">
         <li><%= link_to "Imprecise Analysis", root_path, class: "btn btn-sm btn-ghost" %></li>
-        <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
-        <li><%= link_to "Daily Usage", daily_usages_path, class: "btn btn-sm btn-ghost" if authenticated? %></li>
-        <li><%= button_to "Log out", session_path, method: :delete, class: "btn btn-sm btn-soft" if authenticated? %></li>
+        <% if authenticated? %>
+          <li><%= link_to "Projects",  projects_path, class: "btn btn-sm btn-ghost" %></li>
+          <li><%= link_to "Daily Usage", daily_usages_path, class: "btn btn-sm btn-ghost" %></li>
+          <li class="ml-auto">
+            <%= form_tag session_path, method: :delete, class: "p-0" do %>
+              <%= submit_tag "Log out", class: "btn btn-sm btn-soft" %>
+            <% end %>
+          </li>
+        <% else %>
+          <li class="ml-auto"><%= link_to "Log in", new_session_path, class: "btn btn-sm btn-soft" %></li>
+        <% end %>
       </ul>
     </nav>
 
@@ -46,15 +54,7 @@
         </div>
       <% end %>
       
-      
       <%= yield %>
-
-      <%
-=begin%>
- <div id="react-root">
-      </div> 
-<%
-=end%>
     </main>
   </body>
 </html>
