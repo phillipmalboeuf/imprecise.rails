@@ -1,5 +1,22 @@
 <h1 class="text-2xl font-bold mb-4">Daily Usage - <%= Date.current.strftime("%B %Y") %></h1>
 
+<% 
+  monthly_limit = ApplicationController::MAX_MONTHLY_TOKENS
+  progress_percentage = [(@grand_total.to_f / monthly_limit * 100).round, 100].min
+  progress_color = @grand_total >= monthly_limit ? "progress-error" : (@grand_total >= monthly_limit * 0.8 ? "progress-warning" : "progress-success")
+%>
+<div class="mb-4">
+  <div class="flex items-center justify-between mb-2">
+    <span class="text-sm font-medium">
+      Monthly Usage: <%= number_with_delimiter(@grand_total) %> / <%= number_with_delimiter(monthly_limit) %> tokens
+    </span>
+    <span class="text-sm font-medium <%= @grand_total >= monthly_limit ? 'text-error' : '' %>">
+      <%= progress_percentage %>%
+    </span>
+  </div>
+  <progress class="progress <%= progress_color %> w-full" value="<%= @grand_total %>" max="<%= monthly_limit %>"></progress>
+</div>
+
 <% if @projects.any? %>
   <div class="overflow-x-auto">
     <table class="table table-pin-cols">
@@ -23,7 +40,7 @@
                 <%= number_with_delimiter(@usage_map[[day, project.id]] || 0) %>
               </td>
             <% end %>
-            <td class="text-right font-bold">
+            <td class="sticky right-0 z-10 bg-base-200 text-right font-bold border-l">
               <%= number_with_delimiter(@project_totals[project.id]) %>
             </td>
           </tr>
@@ -37,7 +54,7 @@
               <%= number_with_delimiter(@daily_totals[day]) %>
             </td>
           <% end %>
-          <td class="text-right">
+          <td class="sticky right-0 z-10 bg-base-200 text-right border-l">
             <%= number_with_delimiter(@grand_total) %>
           </td>
         </tr>

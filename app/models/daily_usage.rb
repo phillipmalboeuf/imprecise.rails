@@ -13,7 +13,6 @@ class DailyUsage < ApplicationRecord
   # and increment the token_used by the specified amount
   def self.increment_tokens!(day:, user:, project:, tokens:)
     daily_usage = find_or_initialize_by(day: day, user: user, project: project)
-    daily_usage.token_used ||= 0
     daily_usage.token_used += tokens
     daily_usage.save!
     daily_usage

@@ -4,8 +4,6 @@
 class QueriesController < ApplicationController
   allow_unauthenticated_access only: [:create]
 
-  MAX_MONTHLY_TOKENS = 10_000
-
   def create
     api_key = extract_api_key
     authenticated_via_api_key = false
