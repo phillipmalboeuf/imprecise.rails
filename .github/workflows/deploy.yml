@@ -1,14 +1,26 @@
 name: Deploy to Dokku
 
 on:
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   types:
+  #     - completed
+  #   branches:
+  #     - '**'
+  # Fallback for branches that don't trigger CI
   push:
     branches:
       - '**'  # Deploy all branches
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/ci.yml'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: "!startsWith(github.ref, 'refs/heads/tests/')"
+    if: |
+      (github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/tests/')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && !startsWith(github.event.workflow_run.head_branch, 'tests/'))
     
     steps:
       - name: Checkout code
@@ -160,6 +172,76 @@ jobs:
           fi
           
           echo "instance_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      - name: Resize EBS volume if needed
+        run: |
+          INSTANCE_ID="${{ steps.instance_details.outputs.instance_id }}"
+          AWS_REGION="${{ secrets.AWS_REGION || 'us-east-1' }}"
+          TARGET_SIZE_GB="${{ secrets.AWS_EBS_VOLUME_SIZE_GB || '30' }}"
+          
+          # Get the root EBS volume ID
+          VOLUME_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --query 'Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId' \
+            --output text)
+          
+          if [ -z "$VOLUME_ID" ] || [ "$VOLUME_ID" == "None" ]; then
+            echo "Could not find EBS volume for instance"
+            exit 0
+          fi
+          
+          # Get current volume size
+          CURRENT_SIZE=$(aws ec2 describe-volumes --volume-ids "$VOLUME_ID" \
+            --region "$AWS_REGION" \
+            --query 'Volumes[0].Size' \
+            --output text)
+          
+          if [ -z "$CURRENT_SIZE" ] || [ "$CURRENT_SIZE" == "None" ]; then
+            echo "Could not determine current volume size"
+            exit 0
+          fi
+          
+          # Resize if current size is less than target
+          if [ "$CURRENT_SIZE" -lt "$TARGET_SIZE_GB" ]; then
+            echo "Resizing EBS volume from ${CURRENT_SIZE}GB to ${TARGET_SIZE_GB}GB"
+            aws ec2 modify-volume --volume-id "$VOLUME_ID" --size "$TARGET_SIZE_GB" --region "$AWS_REGION"
+            
+            # Wait for volume modification to complete by polling status
+            echo "Waiting for volume modification to complete..."
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              MODIFICATION_STATE=$(aws ec2 describe-volumes-modifications --volume-ids "$VOLUME_ID" \
+                --region "$AWS_REGION" \
+                --query 'VolumesModifications[0].ModificationState' \
+                --output text 2>/dev/null || echo "completed")
+              
+              if [ "$MODIFICATION_STATE" == "completed" ] || [ "$MODIFICATION_STATE" == "None" ] || [ -z "$MODIFICATION_STATE" ]; then
+                echo "Volume modification completed"
+                break
+              fi
+              
+              echo "Volume modification state: $MODIFICATION_STATE (attempt $((ATTEMPT+1))/$MAX_ATTEMPTS)"
+              sleep 10
+              ATTEMPT=$((ATTEMPT+1))
+            done
+            
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "Warning: Volume modification may still be in progress, continuing anyway..."
+            fi
+            
+            # Resize the filesystem on the instance (requires SSH access)
+            INSTANCE_IP="${{ steps.instance_details.outputs.instance_ip }}"
+            SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            if [ -f "$HOME/.ssh/dokku_deploy_key" ]; then
+              SSH_OPTS="$SSH_OPTS -i $HOME/.ssh/dokku_deploy_key"
+            fi
+            
+            # Resize the partition and filesystem
+            ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1 2>/dev/null || sudo resize2fs /dev/xvda1 2>/dev/null || true" || true
+          else
+            echo "EBS volume size (${CURRENT_SIZE}GB) is already at or above target (${TARGET_SIZE_GB}GB)"
+          fi
 
       - name: Check and configure security group ports
         run: |
@@ -439,10 +521,33 @@ jobs:
             ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku plugin:install https://github.com/dokku/dokku-letsencrypt.git"
           fi
           
-          # Configure Let's Encrypt
-          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:set --global email $LETSENCRYPT_EMAIL" 2>/dev/null || true
-          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:enable $APP_NAME" 2>/dev/null || \
-          ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:renew $APP_NAME" 2>/dev/null || true
+          # Check if certificate exists by parsing letsencrypt:list table output
+          CERT_LIST=$(ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:list $APP_NAME 2>/dev/null" || echo "")
+          CERT_EXISTS=$(echo "$CERT_LIST" | grep -E "^${APP_NAME}[[:space:]]+" | wc -l)
+          
+          if [ "$CERT_EXISTS" -eq 0 ]; then
+            # No certificate exists, enable Let's Encrypt
+            ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:set --global email $LETSENCRYPT_EMAIL" 2>/dev/null || true
+            ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:enable $APP_NAME" 2>/dev/null || true
+          else
+            # Certificate exists, check if renewal is needed based on "Time before renewal" column
+            # Extract the time before renewal (last column in the table)
+            RENEWAL_TIME=$(echo "$CERT_LIST" | grep -E "^${APP_NAME}[[:space:]]+" | awk '{print $NF}' || echo "")
+            
+            # If renewal time is less than 1 day (e.g., "23h" or "5d"), renew the certificate
+            # Parse days/hours format and check if within 1 day
+            if [ -n "$RENEWAL_TIME" ]; then
+              # Extract days (if present) and hours (if present)
+              DAYS=$(echo "$RENEWAL_TIME" | grep -oE '[0-9]+d' | grep -oE '[0-9]+' || echo "0")
+              HOURS=$(echo "$RENEWAL_TIME" | grep -oE '[0-9]+h' | grep -oE '[0-9]+' || echo "0")
+              
+              # If days is 0 or not present and we're close to renewal (within 1 day), renew
+              if [ "$DAYS" -eq 0 ] || [ -z "$DAYS" ]; then
+                # Within 1 day, renew the certificate
+                ssh $SSH_OPTS ubuntu@$INSTANCE_IP "sudo dokku letsencrypt:renew $APP_NAME" 2>/dev/null || true
+              fi
+            fi
+          fi
           
           # Configure security group
           INSTANCE_SG_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" \
