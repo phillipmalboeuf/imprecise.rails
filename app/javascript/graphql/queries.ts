@@ -21,6 +21,7 @@ export const CREATE_QUERY = gql`
         id
         query
         response
+        answer
         projectId
         createdAt
       }

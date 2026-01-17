@@ -35,15 +35,8 @@ class QueriesController < ApplicationController
     @query = Query.new(query_params)
     @query.project = project
     
-    # Estimate tokens for this query
-    estimated_tokens = AiAnalysisService.new(@query).estimate_prompt_tokens
-    
-    # Get current monthly usage
-    current_monthly_usage = DailyUsage.monthly_total(user: project.owner, project: project)
-    
-    # Check if adding this query would exceed the monthly limit (10,000 tokens)
-    if current_monthly_usage + estimated_tokens > MAX_MONTHLY_TOKENS
-      error_message = "Monthly token limit exceeded. Current usage: #{current_monthly_usage}, Estimated for this query: #{estimated_tokens}, Limit: #{MAX_MONTHLY_TOKENS}."
+    # Check if adding this query would exceed the monthly limit
+    if error_message = @query.monthly_token_limit_error_message
       if authenticated_via_api_key
         render json: { error: error_message }, status: :forbidden
         return
@@ -54,24 +47,7 @@ class QueriesController < ApplicationController
     end
 
     if @query.save
-      ai_response = AiAnalysisService.new(@query).call
-      @query.update(response: { content: ai_response }) if ai_response.present?
-
-      # Track daily usage if we have a valid AI response with usage information
-      if ai_response.present? && !ai_response.is_a?(Hash) && ai_response.respond_to?(:usage)
-        usage = ai_response.usage
-        if usage && usage.respond_to?(:prompt_tokens)
-          prompt_tokens = usage.prompt_tokens || 0
-          if prompt_tokens > 0
-            DailyUsage.increment_tokens!(
-              day: Date.current,
-              user: project.owner,
-              project: project,
-              tokens: prompt_tokens
-            )
-          end
-        end
-      end
+      @query.run_ai_analysis!
 
       # If authenticated via API key, return JSON response
       if authenticated_via_api_key

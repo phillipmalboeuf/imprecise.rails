@@ -49,18 +49,11 @@ module Mutations
       # Create query object
       new_query = Query.new(query: query, project: project)
 
-      # Estimate tokens for this query
-      estimated_tokens = AiAnalysisService.new(new_query).estimate_prompt_tokens
-
-      # Get current monthly usage
-      current_monthly_usage = DailyUsage.monthly_total(user: project.owner, project: project)
-      max_monthly_tokens = ApplicationController::MAX_MONTHLY_TOKENS
-
       # Check if adding this query would exceed the monthly limit
-      if current_monthly_usage + estimated_tokens > max_monthly_tokens
+      if error_message = new_query.monthly_token_limit_error_message
         return {
           query: nil,
-          errors: ["Monthly token limit exceeded. Current usage: #{current_monthly_usage}, Estimated for this query: #{estimated_tokens}, Limit: #{max_monthly_tokens}."]
+          errors: [error_message]
         }
       end
 
@@ -73,34 +66,7 @@ module Mutations
       end
 
       # Run AI analysis
-      ai_response = AiAnalysisService.new(new_query).call
-      if ai_response.present?
-        # Store the response in a format that matches the controller's expectations
-        response_data = if ai_response.is_a?(Hash)
-          ai_response
-        elsif ai_response.respond_to?(:to_h)
-          ai_response.to_h
-        else
-          { content: ai_response }
-        end
-        new_query.update(response: response_data)
-      end
-
-      # Track daily usage if we have a valid AI response with usage information
-      if ai_response.present? && !ai_response.is_a?(Hash) && ai_response.respond_to?(:usage)
-        usage = ai_response.usage
-        if usage && usage.respond_to?(:prompt_tokens)
-          prompt_tokens = usage.prompt_tokens || 0
-          if prompt_tokens > 0
-            DailyUsage.increment_tokens!(
-              day: Date.current,
-              user: project.owner,
-              project: project,
-              tokens: prompt_tokens
-            )
-          end
-        end
-      end
+      new_query.run_ai_analysis!
 
       {
         query: new_query,

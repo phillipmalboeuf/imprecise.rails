@@ -37,27 +37,36 @@
           <div class="card-body">
             <h3 class="card-title text-lg">Query</h3>
             <p class="mb-3"><%= query.query %></p>
-            
+
+            <% if query.answer.present? %>
+            <div class="mt-3">
+              <h4 class="font-semibold mb-2">Answer:</h4>
+              <div class="flex flex-wrap gap-2">
+                <% query.answer.each do |term| %>
+                  <span class="badge badge-soft"><%= term %></span>
+                <% end %>
+              </div>
+            </div>
+            <% end %>
+
             <% if query.response.present? %>
               <div class="mt-3">
-                <h4 class="font-semibold mb-2">Response:</h4>
-                <div class="bg-base-200 p-4 rounded">
-                  <% if query.response.is_a?(Hash) && query.response["content"] %>
-                    <p><%= query.response["content"] %></p>
-                  <% elsif query.response.is_a?(String) %>
-                    <p><%= query.response %></p>
-                  <% else %>
-                    <pre><%= JSON.pretty_generate(query.response) %></pre>
-                  <% end %>
-                </div>
+                <details class="dropdown">
+                <summary class="btn btn-sm btn-soft m-1">View Response</summary>
+                  <div class="bg-base-200 p-4 rounded">
+                    <% if query.response.is_a?(Hash) && query.response["content"] %>
+                      <p><%= query.response["content"] %></p>
+                    <% elsif query.response.is_a?(String) %>
+                      <p><%= query.response %></p>
+                    <% else %>
+                      <pre><%= JSON.pretty_generate(query.response) %></pre>
+                    <% end %>
+                  </div>
+                </details>
               </div>
             <% else %>
               <p class="text-gray-500 italic">Processing...</p>
             <% end %>
-            
-            <div class="text-sm text-gray-500 mt-2">
-              Created: <%= query.created_at.strftime("%B %d, %Y at %I:%M %p") %>
-            </div>
           </div>
         </div>
       <% end %>

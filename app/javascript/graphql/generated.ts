@@ -42,7 +42,7 @@ export type CreateQueryPayload = {
 
 export type Mutation = {
   __typename?: 'Mutation';
-  /** Create a new query for AI analysis using API key authentication */
+  /** Create a new query for AI analysis. API key required unless project is in public published projects list. */
   createQuery?: Maybe<CreateQueryPayload>;
 };
 
@@ -116,6 +116,8 @@ export type QueryProjectsArgs = {
 /** A query for AI analysis */
 export type QueryModel = {
   __typename?: 'QueryModel';
+  /** List of extracted answer terms */
+  answer?: Maybe<Array<Scalars['String']['output']>>;
   /** When the query was created */
   createdAt: Scalars['ISO8601DateTime']['output'];
   /** Unique identifier for the query */
@@ -134,6 +136,13 @@ export type GetPublicPublishedProjectsQueryVariables = Exact<{ [key: string]: ne
 
 
 export type GetPublicPublishedProjectsQuery = { __typename?: 'Query', publicPublishedProjects: Array<{ __typename?: 'Project', id: string, name: string, slug: string, status?: ProjectStatusEnum | null, promptType: PromptTypeEnum, createdAt: any, updatedAt: any }> };
+
+export type CreateQueryMutationVariables = Exact<{
+  input: CreateQueryInput;
+}>;
+
+
+export type CreateQueryMutation = { __typename?: 'Mutation', createQuery?: { __typename?: 'CreateQueryPayload', errors: Array<string>, query?: { __typename?: 'QueryModel', id: string, query: string, response?: any | null, answer?: Array<string> | null, projectId: string, createdAt: any } | null } | null };
 
 
 export const GetPublicPublishedProjectsDocument = gql`
@@ -184,3 +193,44 @@ export type GetPublicPublishedProjectsQueryHookResult = ReturnType<typeof useGet
 export type GetPublicPublishedProjectsLazyQueryHookResult = ReturnType<typeof useGetPublicPublishedProjectsLazyQuery>;
 export type GetPublicPublishedProjectsSuspenseQueryHookResult = ReturnType<typeof useGetPublicPublishedProjectsSuspenseQuery>;
 export type GetPublicPublishedProjectsQueryResult = Apollo.QueryResult<GetPublicPublishedProjectsQuery, GetPublicPublishedProjectsQueryVariables>;
+export const CreateQueryDocument = gql`
+    mutation CreateQuery($input: CreateQueryInput!) {
+  createQuery(input: $input) {
+    query {
+      id
+      query
+      response
+      answer
+      projectId
+      createdAt
+    }
+    errors
+  }
+}
+    `;
+export type CreateQueryMutationFn = Apollo.MutationFunction<CreateQueryMutation, CreateQueryMutationVariables>;
+
+/**
+ * __useCreateQueryMutation__
+ *
+ * To run a mutation, you first call `useCreateQueryMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useCreateQueryMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [createQueryMutation, { data, loading, error }] = useCreateQueryMutation({
+ *   variables: {
+ *      input: // value for 'input'
+ *   },
+ * });
+ */
+export function useCreateQueryMutation(baseOptions?: Apollo.MutationHookOptions<CreateQueryMutation, CreateQueryMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return Apollo.useMutation<CreateQueryMutation, CreateQueryMutationVariables>(CreateQueryDocument, options);
+      }
+export type CreateQueryMutationHookResult = ReturnType<typeof useCreateQueryMutation>;
+export type CreateQueryMutationResult = Apollo.MutationResult<CreateQueryMutation>;
+export type CreateQueryMutationOptions = Apollo.BaseMutationOptions<CreateQueryMutation, CreateQueryMutationVariables>;

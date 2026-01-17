@@ -109,12 +109,23 @@ const QueryForm: FC<QueryFormProps> = ({ projectId, promptType }) => {
 
       {response && (
         <div className="space-y-2">
-          <h3 className="font-bold text-lg">Response</h3>
-          <div className="card bg-base-200 p-4">
-            <pre className="whitespace-pre-wrap text-sm">
-              {JSON.stringify(response.response || response, null, 2)}
-            </pre>
+          <div className="mb-4">
+            <h4 className="font-semibold mb-1">Answer</h4>
+            <div className="flex flex-wrap gap-1">
+              {response.answer.map((term: string) => (
+                <span className="badge badge-primary">{term}</span>
+              ))}
+            </div>
           </div>
+
+          <details className="dropdown">
+            <summary className="btn btn-sm btn-soft m-1">View Response</summary>
+            <div className="bg-base-200 p-4 rounded">
+              <pre className="whitespace-pre-wrap text-sm">
+                {JSON.stringify(response.response || response, null, 2)}
+              </pre>
+            </div>
+          </details>
         </div>
       )}
     </div>

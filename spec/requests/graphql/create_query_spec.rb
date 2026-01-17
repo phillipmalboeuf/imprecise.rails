@@ -59,6 +59,12 @@ RSpec.describe "GraphQL CreateQuery Mutation", type: :request do
         created_query = Query.last
         expect(created_query.query).to eq("Is this spam?")
         expect(created_query.project_id).to eq(project.id)
+        
+        # Verify answer field is populated if AI response contains choices
+        if created_query.answer.present?
+          expect(created_query.answer).to be_an(Array)
+          expect(created_query.answer.all? { |item| item.is_a?(String) }).to be true
+        end
       end
 
       it "works with ApiKey prefix" do
