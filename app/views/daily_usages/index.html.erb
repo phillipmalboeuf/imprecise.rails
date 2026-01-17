@@ -3,18 +3,12 @@
 <% 
   monthly_limit = ApplicationController::MAX_MONTHLY_TOKENS
   progress_percentage = [(@grand_total.to_f / monthly_limit * 100).round, 100].min
-  progress_color = @grand_total >= monthly_limit ? "progress-error" : (@grand_total >= monthly_limit * 0.8 ? "progress-warning" : "progress-success")
+  progress_color = @grand_total >= monthly_limit ? "text-error" : (@grand_total >= monthly_limit * 0.8 ? "text-warning" : "text-success")
 %>
 <div class="mb-4">
-  <div class="flex items-center justify-between mb-2">
-    <span class="text-sm font-medium">
-      Monthly Usage: <%= number_with_delimiter(@grand_total) %> / <%= number_with_delimiter(monthly_limit) %> tokens
-    </span>
-    <span class="text-sm font-medium <%= @grand_total >= monthly_limit ? 'text-error' : '' %>">
-      <%= progress_percentage %>%
-    </span>
+  <div class="radial-progress bg-neutral border-4 border-neutral text-center <%= progress_color %>" style="--size:8rem; --value:<%= progress_percentage %>;" aria-valuenow="<%= progress_percentage %>" role="progressbar">
+    <%= number_with_delimiter(@grand_total) %><br><small class="text-xs">/ <%= number_with_delimiter(monthly_limit) %></small>
   </div>
-  <progress class="progress <%= progress_color %> w-full" value="<%= @grand_total %>" max="<%= monthly_limit %>"></progress>
 </div>
 
 <% if @projects.any? %>
