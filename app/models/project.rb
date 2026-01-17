@@ -42,6 +42,12 @@ class Project < ApplicationRecord
     super
   end
 
+  # Returns published projects for the first user (public access)
+  def self.public_published_projects
+    projects = User.order(:id).first&.projects || Project.none
+    projects.where(status: "published").order(created_at: :asc)
+  end
+
   private
 
     def ensure_encrypted_apikey

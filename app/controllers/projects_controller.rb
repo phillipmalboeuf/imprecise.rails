@@ -1,6 +1,24 @@
 class ProjectsController < ApplicationController
+  allow_unauthenticated_access only: [:public_published_projects]
+
   def index
-    @projects = Current.user.projects.includes(:owner)
+    @projects = Current.user.projects.includes(:owner).order(created_at: :asc)
+  end
+
+  def public_published_projects
+    published_projects = Project.public_published_projects
+    
+    render json: published_projects.map do |project|
+      {
+        id: project.id,
+        name: project.name,
+        slug: project.slug,
+        status: project.status,
+        prompt_type: project.prompt_type,
+        created_at: project.created_at,
+        updated_at: project.updated_at
+      }
+    end
   end
 
   def show

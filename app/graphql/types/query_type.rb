@@ -47,5 +47,12 @@ module Types
         raise GraphQL::ExecutionError, "Either id or slug must be provided"
       end
     end
+
+    field :public_published_projects, [Types::ProjectType], null: false,
+      description: "Public list of published projects for the first user (no owner information)"
+
+    def public_published_projects
+      Project.public_published_projects
+    end
   end
 end

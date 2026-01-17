@@ -3,12 +3,16 @@ Rails.application.routes.draw do
     mount GraphiQL::Rails::Engine, at: "/graphiql", graphql_path: "/graphql"
   end
   post "/graphql", to: "graphql#execute"
+  get "/graphql/introspect", to: "graphql#introspection"
   root "root#index"
   
   resource :session
   resources :passwords, param: :token
   resources :users, only: %i[ new create ]
   resources :projects, param: :slug do
+    collection do
+      get :public_published_projects
+    end
     member do
       patch :regenerate_apikey
     end
